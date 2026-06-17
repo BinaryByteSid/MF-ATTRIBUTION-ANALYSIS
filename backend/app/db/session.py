@@ -28,6 +28,26 @@ if "postgresql" in database_url:
         database_url = "sqlite+aiosqlite:///./db.sqlite3"
         sync_database_url = "sqlite:///./db.sqlite3"
 
+from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
+
+ssl_required = False
+if database_url.startswith("postgresql"):
+    parsed = urlparse(database_url)
+    query = parse_qs(parsed.query)
+    if "sslmode" in query:
+        sslmode_val = query.pop("sslmode")[0]
+        if sslmode_val in ("require", "verify-full", "verify-ca", "prefer"):
+            ssl_required = True
+    new_query_str = urlencode(query, doseq=True)
+    database_url = urlunparse((
+        parsed.scheme,
+        parsed.netloc,
+        parsed.path,
+        parsed.params,
+        new_query_str,
+        parsed.fragment
+    ))
+
 is_sqlite = database_url.startswith("sqlite")
 
 # ── Async engine (FastAPI/asyncio) ────────────────────────────────────────────
@@ -37,12 +57,17 @@ if is_sqlite:
         echo=settings.ENVIRONMENT == "development",
     )
 else:
+    connect_args = {}
+    if ssl_required:
+        connect_args["ssl"] = True
+        
     engine = create_async_engine(
         database_url,
         echo=settings.ENVIRONMENT == "development",
         pool_pre_ping=True,
         pool_size=10,
         max_overflow=20,
+        connect_args=connect_args,
     )
 
 AsyncSessionLocal = async_sessionmaker(
