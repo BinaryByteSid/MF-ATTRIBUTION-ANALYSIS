@@ -14,6 +14,7 @@ import {
   parseUploadedHoldings,
   analyzePortfolio,
   chatWithCopilot,
+  API_BASE_URL,
 } from '../api';
 import type {
   Holding,
@@ -1901,7 +1902,7 @@ export const AttributionDashboard: React.FC = () => {
     setReportFormat('xlsx');
     
     try {
-      const apiBaseUrl = window.location.origin + '/api/v1';
+      const apiBaseUrl = API_BASE_URL;
       const benchParams = selectedBenchFund
         ? `&bench_isin=${selectedBenchFund.isin}&bench_name=${encodeURIComponent(selectedBenchFund.name)}`
         : '';
