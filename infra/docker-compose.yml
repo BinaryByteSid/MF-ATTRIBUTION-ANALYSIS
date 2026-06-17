@@ -1,0 +1,120 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: mf_attribution
+      POSTGRES_USER: mfuser
+      POSTGRES_PASSWORD: secret
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    ports:
+      - "5435:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mfuser -d mf_attribution"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  backend:
+    build: ../backend
+    command: uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+    volumes:
+      - ../backend:/app
+      - reports_data:/tmp/mf_reports
+    environment:
+      DATABASE_URL: postgresql+asyncpg://mfuser:secret@postgres:5432/mf_attribution
+      SYNC_DATABASE_URL: postgresql+psycopg2://mfuser:secret@postgres:5432/mf_attribution
+      REDIS_URL: redis://redis:6379/0
+      SECRET_KEY: dev-secret-key-change-in-production
+      ENVIRONMENT: development
+      FIRST_SUPERUSER_EMAIL: admin@mfattribution.com
+      FIRST_SUPERUSER_PASSWORD: changeme123
+      REPORTS_DIR: /tmp/mf_reports
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8005:8000"
+
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_BASE_URL=http://localhost:8005/api/v1
+    depends_on:
+      - backend
+
+  celery_worker:
+    build: ../backend
+    command: celery -A app.tasks.celery_app worker -Q ingestion,compute,reports --loglevel=info --concurrency=2
+    volumes:
+      - ../backend:/app
+      - reports_data:/tmp/mf_reports
+    environment:
+      DATABASE_URL: postgresql+asyncpg://mfuser:secret@postgres:5432/mf_attribution
+      SYNC_DATABASE_URL: postgresql+psycopg2://mfuser:secret@postgres:5432/mf_attribution
+      REDIS_URL: redis://redis:6379/0
+      SECRET_KEY: dev-secret-key-change-in-production
+      REPORTS_DIR: /tmp/mf_reports
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  celery_beat:
+    build: ../backend
+    command: celery -A app.tasks.celery_app beat --loglevel=info
+    volumes:
+      - ../backend:/app
+    environment:
+      DATABASE_URL: postgresql+asyncpg://mfuser:secret@postgres:5432/mf_attribution
+      SYNC_DATABASE_URL: postgresql+psycopg2://mfuser:secret@postgres:5432/mf_attribution
+      REDIS_URL: redis://redis:6379/0
+      SECRET_KEY: dev-secret-key-change-in-production
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  flower:
+    build: ../backend
+    command: celery -A app.tasks.celery_app flower --port=5555
+    ports:
+      - "5555:5555"
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      SECRET_KEY: dev-secret-key-change-in-production
+      DATABASE_URL: postgresql+asyncpg://mfuser:secret@postgres:5432/mf_attribution
+      SYNC_DATABASE_URL: postgresql+psycopg2://mfuser:secret@postgres:5432/mf_attribution
+    depends_on:
+      - celery_worker
+
+  nginx:
+    image: nginx:alpine
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+
+volumes:
+  pg_data:
+  reports_data:

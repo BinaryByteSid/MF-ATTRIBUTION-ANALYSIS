@@ -1,0 +1,415 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap');
+
+:root {
+  font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+
+  color-scheme: dark;
+  color: #e2e8f0;
+  background-color: #050811;
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+
+  /* Theme colors */
+  --bg-primary: #050811;
+  --bg-secondary: #0a0d1a;
+  --glass-bg: rgba(13, 20, 38, 0.6);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --glass-highlight: rgba(255, 255, 255, 0.04);
+
+  --accent-emerald: #10b981;
+  --accent-blue: #3b82f6;
+  --accent-purple: #8b5cf6;
+  --accent-amber: #f59e0b;
+  --accent-rose: #f43f5e;
+  --accent-cyan: #06b6d4;
+  --accent-indigo: #6366f1;
+  --text-muted: #94a3b8;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: radial-gradient(circle at 50% 0%, #111a33 0%, var(--bg-primary) 70%);
+  overflow-x: hidden;
+  position: relative;
+}
+
+/* Premium background blobs */
+.bg-blob {
+  position: fixed;
+  width: 600px;
+  height: 600px;
+  border-radius: 50%;
+  filter: blur(140px);
+  opacity: 0.08;
+  pointer-events: none;
+  z-index: -1;
+  animation: floatOrb 25s infinite alternate ease-in-out;
+}
+
+.bg-blob-1 {
+  background: var(--accent-blue);
+  top: -15%;
+  left: -15%;
+  animation-duration: 22s;
+}
+
+.bg-blob-2 {
+  background: var(--accent-purple);
+  bottom: -15%;
+  right: -15%;
+  animation-duration: 28s;
+  animation-delay: -7s;
+}
+
+.bg-blob-3 {
+  background: var(--accent-cyan);
+  top: 40%;
+  left: 40%;
+  width: 450px;
+  height: 450px;
+  animation-duration: 32s;
+  animation-delay: -12s;
+}
+
+@keyframes floatOrb {
+  0% {
+    transform: translate(0, 0) scale(1) rotate(0deg);
+  }
+
+  50% {
+    transform: translate(100px, 60px) scale(1.15) rotate(180deg);
+  }
+
+  100% {
+    transform: translate(-50px, -70px) scale(0.9) rotate(360deg);
+  }
+}
+
+/* Glass Card styling with premium hover effects */
+.glass-card {
+  background: var(--glass-bg);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--glass-border);
+  border-radius: 16px;
+  padding: 24px;
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4);
+  transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.4s ease, box-shadow 0.4s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.glass-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 100%;
+  background: linear-gradient(135deg, var(--glass-highlight) 0%, transparent 100%);
+  pointer-events: none;
+}
+
+/* Shimmer overlay effect on hover */
+.glass-card::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -150%;
+  width: 50%;
+  height: 100%;
+  background: linear-gradient(to right,
+      rgba(255, 255, 255, 0) 0%,
+      rgba(255, 255, 255, 0.05) 50%,
+      rgba(255, 255, 255, 0) 100%);
+  transform: skewX(-25deg);
+  transition: none;
+  pointer-events: none;
+}
+
+.glass-card:hover {
+  transform: translateY(-4px);
+  border-color: rgba(59, 130, 246, 0.35);
+  box-shadow: 0 16px 48px 0 rgba(59, 130, 246, 0.15), 0 8px 32px 0 rgba(0, 0, 0, 0.4);
+}
+
+.glass-card:hover::after {
+  animation: shine 1.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes shine {
+  0% {
+    left: -150%;
+  }
+
+  100% {
+    left: 150%;
+  }
+}
+
+/* Custom interactive inputs & buttons */
+button {
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  outline: none;
+}
+
+button:active {
+  transform: scale(0.96) !important;
+}
+
+button.btn-primary {
+  background: linear-gradient(135deg, var(--accent-blue) 0%, var(--accent-purple) 100%);
+  color: white;
+  border: none;
+  font-weight: 600;
+  padding: 10px 20px;
+  border-radius: 10px;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(59, 130, 246, 0.4);
+}
+
+button.btn-primary:hover {
+  opacity: 0.95;
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(59, 130, 246, 0.5), 0 0 14px rgba(139, 92, 246, 0.4);
+}
+
+select,
+input {
+  background: rgba(10, 15, 30, 0.85);
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  padding: 10px 14px;
+  color: white;
+  font-family: inherit;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+select:hover,
+input:hover {
+  border-color: rgba(59, 130, 246, 0.3);
+  background: rgba(10, 15, 30, 0.95);
+}
+
+select option {
+  background-color: #0b0f19;
+  color: #e2e8f0;
+}
+
+select:focus,
+input:focus {
+  border-color: var(--accent-blue);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25);
+  background: rgba(10, 15, 30, 0.95);
+}
+
+/* Premium table styling */
+table.attribution-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 12px;
+}
+
+table.attribution-table th {
+  text-align: left;
+  padding: 14px 16px;
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border-bottom: 1px solid var(--glass-border);
+}
+
+table.attribution-table td {
+  padding: 16px;
+  font-size: 0.95rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  transition: background 0.2s ease;
+}
+
+table.attribution-table tbody tr {
+  transition: background-color 0.2s ease;
+}
+
+table.attribution-table tbody tr:hover td {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+/* Neon Glow values */
+.glow-green {
+  color: var(--accent-emerald);
+  text-shadow: 0 0 10px rgba(16, 185, 129, 0.2);
+}
+
+.glow-red {
+  color: var(--accent-rose);
+  text-shadow: 0 0 10px rgba(244, 63, 94, 0.2);
+}
+
+.glow-blue {
+  color: var(--accent-blue);
+  text-shadow: 0 0 10px rgba(59, 130, 246, 0.2);
+}
+
+/* Tab indicator */
+.tab-btn {
+  background: transparent;
+  border: none;
+  padding: 12px 20px;
+  color: var(--text-muted);
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  position: relative;
+  font-size: 0.95rem;
+}
+
+.tab-btn:hover {
+  color: white;
+}
+
+.tab-btn.active {
+  color: white;
+}
+
+.tab-btn.active::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 15%;
+  width: 70%;
+  height: 3px;
+  background: linear-gradient(90deg, var(--accent-blue), var(--accent-purple));
+  border-radius: 2px;
+  box-shadow: 0 2px 10px rgba(59, 130, 246, 0.5);
+}
+
+/* Skeleton loader style */
+.skeleton {
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.02) 25%, rgba(255, 255, 255, 0.07) 50%, rgba(255, 255, 255, 0.02) 75%);
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.6s infinite linear;
+  border-radius: 6px;
+}
+
+@keyframes skeleton-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+/* Entrance Animations */
+.animate-fade-in-up {
+  opacity: 0;
+  animation: fadeInUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.delay-1 {
+  animation-delay: 0.08s;
+}
+
+.delay-2 {
+  animation-delay: 0.16s;
+}
+
+.delay-3 {
+  animation-delay: 0.24s;
+}
+
+.delay-4 {
+  animation-delay: 0.32s;
+}
+
+.delay-5 {
+  animation-delay: 0.4s;
+}
+
+/* custom scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-primary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+@media print {
+  body {
+    background: white !important;
+    color: black !important;
+  }
+
+  .glass-card {
+    background: transparent !important;
+    border: 1px solid #ccc !important;
+    box-shadow: none !important;
+    color: black !important;
+    page-break-inside: avoid;
+    transform: none !important;
+  }
+
+  button,
+  select,
+  input,
+  .tab-btn::after,
+  ::-webkit-scrollbar,
+  .lucide {
+    display: none !important;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  td,
+  th,
+  span {
+    color: black !important;
+    text-shadow: none !important;
+  }
+
+  table.attribution-table th,
+  table.attribution-table td {
+    border-bottom: 1px solid #ccc !important;
+  }
+
+  .glow-green,
+  .glow-red,
+  .glow-blue {
+    color: black !important;
+    text-shadow: none !important;
+  }
+}
