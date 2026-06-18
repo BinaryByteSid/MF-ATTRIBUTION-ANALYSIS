@@ -143,9 +143,11 @@ async def get_monthly_tracker(
     for the chosen fund.
     """
     settings = get_settings()
+    current_dir = Path(__file__).resolve().parent
     base_dir = Path(__file__).resolve().parents[4]
     # Check multiple possible template locations
     possible_paths = [
+        current_dir.parent.parent / "templates" / "Monthly Tracker - Flexi cap.xlsx",
         base_dir / "FUNDS PERFORMANCE ANALYSIS" / "Monthly Tracker - Flexi cap.xlsx",
         base_dir / "Monthly Tracker - Flexi cap.xlsx",
     ]
