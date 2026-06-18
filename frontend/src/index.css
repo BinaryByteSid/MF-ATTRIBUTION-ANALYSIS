@@ -347,23 +347,47 @@ table.attribution-table tbody tr:hover td {
   animation-delay: 0.4s;
 }
 
-/* custom scrollbars */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+/* Mobile Responsive Styles & Grids */
+.grid-3-2 {
+  display: grid;
+  grid-template-columns: 3fr 2fr;
+  gap: 24px;
+  align-items: start;
 }
 
-::-webkit-scrollbar-track {
-  background: var(--bg-primary);
+.grid-2-3 {
+  display: grid;
+  grid-template-columns: 2fr 3fr;
+  gap: 24px;
+  align-items: start;
 }
 
-::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.08);
-  border-radius: 4px;
+.tab-btn {
+  background: transparent;
+  border: none;
+  padding: 12px 20px;
+  color: var(--text-muted);
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  position: relative;
+  font-size: 0.95rem;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
-::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.15);
+@media (max-width: 992px) {
+  .grid-3-2,
+  .grid-2-3 {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+}
+
+@media (max-width: 768px) {
+  body {
+    padding: 0;
+  }
 }
 
 @media print {

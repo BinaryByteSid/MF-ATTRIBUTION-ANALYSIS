@@ -56,8 +56,8 @@ function App() {
         top: 0,
         zIndex: 50
       }}>
-        <div style={{ maxWidth: '1440px', margin: '0 auto', padding: '16px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <div className="navbar-container">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
             <span style={{ 
               fontWeight: 800, 
               fontSize: '1.25rem', 
@@ -69,21 +69,15 @@ function App() {
             <span style={{ fontSize: '0.75rem', background: 'rgba(255,255,255,0.08)', padding: '2px 8px', borderRadius: '4px', color: 'var(--text-muted)' }}>PORTFOLIO ANALYTICS</span>
           </div>
           
-          <div style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
-            <div style={{ display: 'flex', gap: '20px', fontSize: '0.85rem' }}>
+          <div className="navbar-menu">
+            <div className="navbar-links">
               <a href="#docs" style={{ color: 'var(--text-muted)', textDecoration: 'none', transition: 'color 0.2s' }}>Documentation</a>
               <a href="#api" style={{ color: 'var(--text-muted)', textDecoration: 'none', transition: 'color 0.2s' }}>API Specs</a>
               <a href="#admin" style={{ color: 'var(--text-muted)', textDecoration: 'none', transition: 'color 0.2s' }}>System Admin</a>
             </div>
             
             {isAuthenticated && (
-              <div style={{ 
-                display: 'flex', 
-                alignItems: 'center', 
-                gap: '12px', 
-                borderLeft: '1px solid var(--glass-border)', 
-                paddingLeft: '24px' 
-              }}>
+              <div className="user-profile-menu">
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', color: 'white' }}>
                   <User size={14} style={{ color: 'var(--accent-blue)' }} />
                   <span>{user?.full_name || user?.email}</span>
