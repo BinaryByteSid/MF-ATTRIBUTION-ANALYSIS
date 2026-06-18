@@ -2562,7 +2562,7 @@ export const AttributionDashboard: React.FC = () => {
             </div>
           )}
 
-          <div className="grid-3-2">
+          <div style={{ display: 'grid', gridTemplateColumns: '3fr 2fr', gap: '24px', alignItems: 'start' }}>
             <div className="glass-card">
               <h3 style={{ margin: '0 0 16px 0', fontSize: '1.15rem' }}>
                 Asset Holdings Allocation: {selectedPortfolioId === 'custom-uploaded' ? (selectedSchemeName === 'ALL_SCHEMES' ? 'All Mutual Funds combined' : selectedSchemeName) : summary?.name}
@@ -3089,7 +3089,7 @@ export const AttributionDashboard: React.FC = () => {
       })()}
 
       {activeTab === 'overlap' && (
-        <div className="animate-fade-in-up grid-2-3">
+        <div className="animate-fade-in-up" style={{ display: 'grid', gridTemplateColumns: '2fr 3fr', gap: '24px', alignItems: 'start' }}>
           <div className="glass-card">
             <h3 style={{ margin: '0 0 16px 0', fontSize: '1.15rem' }}>Portfolio Overlap Analyzer</h3>
             <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '24px' }}>
@@ -3749,7 +3749,7 @@ export const AttributionDashboard: React.FC = () => {
       )}
 
       {activeTab === 'copilot' && (
-        <div className="animate-fade-in-up" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '24px', textAlign: 'left' }}>
+        <div className="animate-fade-in-up" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(480px, 1fr))', gap: '24px', textAlign: 'left' }}>
           {/* Left Panel: Diagnostics & Health Card */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
             <div className="glass-card" style={{ margin: 0, padding: '24px' }}>
