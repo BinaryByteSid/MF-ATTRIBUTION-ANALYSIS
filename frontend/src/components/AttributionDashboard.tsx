@@ -1362,6 +1362,8 @@ export const AttributionDashboard: React.FC = () => {
   const [reportFormat, setReportFormat] = useState<'pdf' | 'xlsx'>('pdf');
   const [reportFromDate, setReportFromDate] = useState<string>('2025-12-01');
   const [reportToDate, setReportToDate] = useState<string>('2026-04-30');
+  const [dashboardFromDate, setDashboardFromDate] = useState<string>('2025-12-01');
+  const [dashboardToDate, setDashboardToDate] = useState<string>('2026-04-30');
 
   const getEntityName = (id: string) => {
     const pMatch = portfolios.find(p => p.id === id);
@@ -1430,25 +1432,34 @@ export const AttributionDashboard: React.FC = () => {
       let rsk: RiskMetrics;
 
       const calcCumulative = (rets: { returnVal: number }[]) => {
-        if (rets.length === 0) return 0.15;
+        if (rets.length === 0) return 0;
         let cum = 1;
         rets.forEach(r => { cum *= (1 + r.returnVal); });
         return cum - 1;
+      };
+
+      const filterFn = (r: { year: number; month: number; returnVal: number }) => {
+        const d = new Date(r.year, r.month - 1, 15);
+        return d >= new Date(dashboardFromDate) && d <= new Date(dashboardToDate);
       };
 
       if (selectedPortfolioId === 'custom-uploaded') {
         const benchmarkFundName = brinsonBenchmarkType === 'scheme' && selectedBenchmarkSchemeName
           ? selectedBenchmarkSchemeName
           : 'NIFTY 50 TRI';
-        const retsPort = getEntityMonthlyReturnsList('ALL_SCHEMES');
-        const retsBench = getEntityMonthlyReturnsList(benchmarkFundName);
+        const retsPortRaw = getEntityMonthlyReturnsList('ALL_SCHEMES');
+        const retsBenchRaw = getEntityMonthlyReturnsList(benchmarkFundName);
+
+        const retsPort = retsPortRaw.filter(filterFn);
+        const retsBench = retsBenchRaw.filter(filterFn);
+
         const aligned = alignReturns(retsPort, retsBench);
         const cumPort = calcCumulative(retsPort);
         const cumBench = calcCumulative(retsBench);
 
         if (selectedSchemeName === 'ALL_SCHEMES' || !selectedSchemeName) {
           holds = customHoldings.map(h => {
-            const retsH = getEntityMonthlyReturnsList(h.scheme_name);
+            const retsH = getEntityMonthlyReturnsList(h.scheme_name).filter(filterFn);
             const cumH = calcCumulative(retsH);
             const calculatedAvgNav = h.current_nav / (1 + cumH);
             return {
@@ -1462,7 +1473,7 @@ export const AttributionDashboard: React.FC = () => {
           const totalInvested = holds.reduce((sum, h) => sum + (h.units * h.avg_nav), 0);
           
           const absReturn = cumPort * 100;
-          const cagr = retsPort.length > 0 ? (Math.pow(1 + cumPort, 12 / retsPort.length) - 1) * 100 : 15.0;
+          const cagr = retsPort.length > 0 ? (Math.pow(1 + cumPort, 12 / retsPort.length) - 1) * 100 : 0.0;
           const xirr = cagr;
           
           summ = {
@@ -1486,18 +1497,20 @@ export const AttributionDashboard: React.FC = () => {
           const scheme = customHoldings.find(h => h.scheme_name === selectedSchemeName);
           if (!scheme) return;
 
-          const retsH = getEntityMonthlyReturnsList(scheme.scheme_name);
+          const retsHRaw = getEntityMonthlyReturnsList(scheme.scheme_name);
+          const retsH = retsHRaw.filter(filterFn);
           const cumH = calcCumulative(retsH);
           const calculatedAvgNav = scheme.current_nav / (1 + cumH);
 
           const benchmarkFundName = brinsonBenchmarkType === 'scheme' && selectedBenchmarkSchemeName
             ? selectedBenchmarkSchemeName
             : 'NIFTY 50 TRI';
-          const retsBenchScheme = getEntityMonthlyReturnsList(benchmarkFundName);
+          const retsBenchSchemeRaw = getEntityMonthlyReturnsList(benchmarkFundName);
+          const retsBenchScheme = retsBenchSchemeRaw.filter(filterFn);
           const cumBenchScheme = calcCumulative(retsBenchScheme);
 
           const absReturn = cumH * 100;
-          const cagr = retsH.length > 0 ? (Math.pow(1 + cumH, 12 / retsH.length) - 1) * 100 : 15.0;
+          const cagr = retsH.length > 0 ? (Math.pow(1 + cumH, 12 / retsH.length) - 1) * 100 : 0.0;
           const xirr = cagr;
 
           summ = {
@@ -1570,7 +1583,9 @@ export const AttributionDashboard: React.FC = () => {
     customHoldings, 
     brinsonBenchmarkType,
     useDynamicCalculation,
-    entityB
+    entityB,
+    dashboardFromDate,
+    dashboardToDate
   ]);
 
   useEffect(() => {
@@ -2447,6 +2462,271 @@ export const AttributionDashboard: React.FC = () => {
       {/* Tab Panels */}
       {activeTab === 'overview' && (
         <div className="animate-fade-in-up" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+          {/* Prominent Fund/Scheme Name Header */}
+          <div style={{ 
+            background: 'linear-gradient(135deg, rgba(6, 9, 19, 0.8) 0%, rgba(30, 41, 59, 0.5) 100%)', 
+            border: '1px solid var(--glass-border)',
+            borderRadius: '16px',
+            padding: '24px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            boxShadow: '0 8px 32px 0 rgba(0, 0, 0, 0.4)',
+            backdropFilter: 'blur(16px)',
+            marginBottom: '8px'
+          }}>
+            <div>
+              <span style={{ fontSize: '0.75rem', background: 'rgba(59, 130, 246, 0.15)', color: 'var(--accent-blue)', padding: '6px 12px', borderRadius: '30px', fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', border: '1px solid rgba(59, 130, 246, 0.3)' }}>
+                Active Portfolio / Scheme
+              </span>
+              <h2 style={{ margin: '12px 0 0 0', fontSize: '1.85rem', fontWeight: 800, background: 'linear-gradient(135deg, #ffffff 0%, #93c5fd 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                {selectedPortfolioId === 'custom-uploaded' ? (selectedSchemeName === 'ALL_SCHEMES' ? '📁 All Uploaded Mutual Fund Schemes Combined' : `📈 ${selectedSchemeName}`) : `📈 ${summary?.name}`}
+              </h2>
+            </div>
+            {selectedPortfolioId === 'custom-uploaded' && (
+              <div style={{ textTransform: 'uppercase', fontSize: '0.75rem', background: 'rgba(16, 185, 129, 0.1)', color: 'var(--accent-emerald)', padding: '8px 16px', borderRadius: '8px', fontWeight: 700, border: '1px solid rgba(16, 185, 129, 0.2)', letterSpacing: '0.05em' }}>
+                📁 Custom Excel Uploaded
+              </div>
+            )}
+          </div>
+
+          {/* Analysis Date Range Selector Section */}
+          {selectedPortfolioId === 'custom-uploaded' && (
+            <div className="glass-card animate-fade-in-up" style={{ padding: '24px', margin: 0, border: '1px solid rgba(59, 130, 246, 0.2)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '1.2rem', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 700 }}>
+                    <Activity size={18} color="var(--accent-blue)" />
+                    <span>Analysis Date Range</span>
+                  </h3>
+                  <p style={{ margin: '4px 0 0 0', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                    Select a date range to filter returns, risk metrics, and brinson sector allocations below.
+                  </p>
+                </div>
+                <div style={{ display: 'flex', gap: '12px', background: 'rgba(255,255,255,0.03)', padding: '4px', borderRadius: '8px', border: '1px solid var(--glass-border)' }}>
+                  <button 
+                    onClick={() => { setDashboardFromDate('2023-04-01'); setDashboardToDate('2026-05-31'); }}
+                    style={{ background: 'none', border: 'none', color: 'var(--accent-cyan)', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer', padding: '4px 10px' }}
+                  >
+                    Reset to Max
+                  </button>
+                  <button 
+                    onClick={() => { setDashboardFromDate('2025-12-01'); setDashboardToDate('2026-04-30'); }}
+                    style={{ background: 'none', border: 'none', color: 'var(--accent-purple)', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer', padding: '4px 10px' }}
+                  >
+                    Last 5 Months
+                  </button>
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap' }}>
+                <div style={{ flex: 1, minWidth: '200px' }}>
+                  <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '8px', fontWeight: 700, letterSpacing: '0.05em' }}>FROM DATE</label>
+                  <input
+                    type="date"
+                    value={dashboardFromDate}
+                    min="2023-04-01"
+                    max="2026-05-31"
+                    onChange={(e) => setDashboardFromDate(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '12px 14px',
+                      background: '#0d1117',
+                      border: '1px solid var(--glass-border)',
+                      borderRadius: '10px',
+                      color: 'white',
+                      fontSize: '0.9rem',
+                      boxSizing: 'border-box',
+                      cursor: 'pointer',
+                      outline: 'none',
+                      transition: 'border-color 0.2s'
+                    }}
+                  />
+                </div>
+                <div style={{ flex: 1, minWidth: '200px' }}>
+                  <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '8px', fontWeight: 700, letterSpacing: '0.05em' }}>TO DATE</label>
+                  <input
+                    type="date"
+                    value={dashboardToDate}
+                    min="2023-04-01"
+                    max="2026-05-31"
+                    onChange={(e) => setDashboardToDate(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '12px 14px',
+                      background: '#0d1117',
+                      border: '1px solid var(--glass-border)',
+                      borderRadius: '10px',
+                      color: 'white',
+                      fontSize: '0.9rem',
+                      boxSizing: 'border-box',
+                      cursor: 'pointer',
+                      outline: 'none',
+                      transition: 'border-color 0.2s'
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Summary Sheet of Excel Report style block */}
+          {selectedPortfolioId === 'custom-uploaded' && summary && risk && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(450px, 1fr))', gap: '24px', marginBottom: '8px' }}>
+              {/* Left Card: Fund Profile & Risk Metrics */}
+              <div className="glass-card" style={{ margin: 0, padding: '24px' }}>
+                <h3 style={{ margin: '0 0 16px 0', fontSize: '1.25rem', display: 'flex', alignItems: 'center', gap: '10px', fontWeight: 700 }}>
+                  <FileText size={20} color="var(--accent-blue)" />
+                  <span>Fund Profile & Risk Metrics Summary</span>
+                </h3>
+                <div style={{ overflowX: 'auto' }}>
+                  <table className="attribution-table">
+                    <thead>
+                      <tr style={{ background: 'rgba(255,255,255,0.02)' }}>
+                        <th style={{ padding: '12px 16px', fontSize: '0.85rem' }}>Metric / Profile Dimension</th>
+                        <th style={{ padding: '12px 16px', fontSize: '0.85rem', textAlign: 'right' }}>Value</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td style={{ padding: '12px 16px', fontWeight: 600 }}>Active Fund Name</td>
+                        <td style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 700, color: 'white', maxWidth: '280px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={selectedSchemeName === 'ALL_SCHEMES' ? 'All Schemes Combined' : selectedSchemeName}>
+                          {selectedSchemeName === 'ALL_SCHEMES' ? 'All Schemes Combined' : selectedSchemeName}
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style={{ padding: '12px 16px', fontWeight: 600 }}>Benchmark Fund</td>
+                        <td style={{ padding: '12px 16px', textAlign: 'right', color: 'var(--text-muted)', fontWeight: 500 }}>
+                          {brinsonBenchmarkType === 'scheme' && selectedBenchmarkSchemeName ? selectedBenchmarkSchemeName : 'NIFTY 50 TRI'}
+                        </td>
+                      </tr>
+                      <tr style={{ background: 'rgba(59, 130, 246, 0.02)' }}>
+                        <td style={{ padding: '12px 16px', fontWeight: 600 }}>Absolute Return</td>
+                        <td style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 700, color: summary.absolute_return >= 0 ? 'var(--accent-emerald)' : 'var(--accent-rose)', fontSize: '1rem' }}>
+                          {summary.absolute_return >= 0 ? '+' : ''}{summary.absolute_return.toFixed(2)}%
+                        </td>
+                      </tr>
+                      <tr style={{ background: 'rgba(59, 130, 246, 0.02)' }}>
+                        <td style={{ padding: '12px 16px', fontWeight: 600 }}>Annualized IRR (XIRR)</td>
+                        <td style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 700, color: 'var(--accent-blue)', fontSize: '1rem' }}>
+                          {summary.xirr.toFixed(2)}%
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style={{ padding: '12px 16px', fontWeight: 600 }}>Sharpe Ratio</td>
+                        <td style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 700, color: risk.sharpe_ratio >= 0 ? 'var(--accent-cyan)' : 'var(--accent-rose)' }}>
+                          {risk.sharpe_ratio.toFixed(2)}
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style={{ padding: '12px 16px', fontWeight: 600 }}>Sortino Ratio</td>
+                        <td style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 700, color: risk.sortino_ratio >= 0 ? 'var(--accent-purple)' : 'var(--accent-rose)' }}>
+                          {risk.sortino_ratio.toFixed(2)}
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style={{ padding: '12px 16px', fontWeight: 600 }}>Portfolio Beta</td>
+                        <td style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 700, color: 'white' }}>
+                          {risk.beta.toFixed(2)}
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style={{ padding: '12px 16px', fontWeight: 600 }}>Jensen's Alpha (%)</td>
+                        <td style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 700, color: risk.alpha >= 0 ? 'var(--accent-emerald)' : 'var(--accent-rose)' }}>
+                          {risk.alpha >= 0 ? '+' : ''}{risk.alpha.toFixed(2)}%
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style={{ padding: '12px 16px', fontWeight: 600 }}>Max Drawdown</td>
+                        <td style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 700, color: 'var(--accent-rose)' }}>
+                          {risk.max_drawdown.toFixed(2)}%
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Right Card: Period Returns & Comparison */}
+              <div className="glass-card" style={{ margin: 0, padding: '24px' }}>
+                <h3 style={{ margin: '0 0 16px 0', fontSize: '1.25rem', display: 'flex', alignItems: 'center', gap: '10px', fontWeight: 700 }}>
+                  <Activity size={20} color="var(--accent-emerald)" />
+                  <span>Monthly Returns Comparison (Date Range Filtered)</span>
+                </h3>
+                
+                {(() => {
+                  const benchmarkFundName = brinsonBenchmarkType === 'scheme' && selectedBenchmarkSchemeName
+                    ? selectedBenchmarkSchemeName
+                    : 'NIFTY 50 TRI';
+                  const retsPortRaw = getEntityMonthlyReturnsList(selectedSchemeName || 'ALL_SCHEMES');
+                  const retsBenchRaw = getEntityMonthlyReturnsList(benchmarkFundName);
+                  const retsNiftyRaw = getEntityMonthlyReturnsList('NIFTY 50 TRI');
+
+                  const filterFn = (r: any) => {
+                    const d = new Date(r.year, r.month - 1, 15);
+                    return d >= new Date(dashboardFromDate) && d <= new Date(dashboardToDate);
+                  };
+                  const retsPort = retsPortRaw.filter(filterFn);
+                  const retsBench = retsBenchRaw.filter(filterFn);
+                  const retsNifty = retsNiftyRaw.filter(filterFn);
+
+                  // Align and group by month
+                  const monthlyRows: any[] = [];
+                  retsPort.forEach((r) => {
+                    const bMatch = retsBench.find(b => b.year === r.year && b.month === r.month);
+                    const nMatch = retsNifty.find(n => n.year === r.year && n.month === r.month);
+                    
+                    const monthName = new Date(r.year, r.month - 1).toLocaleString('default', { month: 'short', year: '2-digit' });
+                    monthlyRows.push({
+                      month: monthName,
+                      portVal: r.returnVal * 100,
+                      benchVal: bMatch ? bMatch.returnVal * 100 : 0,
+                      niftyVal: nMatch ? nMatch.returnVal * 100 : 0,
+                    });
+                  });
+
+                  if (monthlyRows.length === 0) {
+                    return (
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '240px', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+                        No returns data found for the selected date range.
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div style={{ overflowY: 'auto', maxHeight: '380px' }}>
+                      <table className="attribution-table">
+                        <thead>
+                          <tr style={{ background: 'rgba(255,255,255,0.02)' }}>
+                            <th style={{ padding: '12px 16px', fontSize: '0.85rem' }}>Month End</th>
+                            <th style={{ padding: '12px 16px', fontSize: '0.85rem', textAlign: 'right' }}>Fund Return</th>
+                            <th style={{ padding: '12px 16px', fontSize: '0.85rem', textAlign: 'right' }}>Benchmark</th>
+                            <th style={{ padding: '12px 16px', fontSize: '0.85rem', textAlign: 'right' }}>Nifty 50 TRI</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {monthlyRows.map((row, idx) => (
+                            <tr key={idx}>
+                              <td style={{ padding: '12px 16px', fontWeight: 600 }}>{row.month}</td>
+                              <td style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 700, color: row.portVal >= 0 ? 'var(--accent-emerald)' : 'var(--accent-rose)' }}>
+                                {row.portVal >= 0 ? '+' : ''}{row.portVal.toFixed(2)}%
+                              </td>
+                              <td style={{ padding: '12px 16px', textAlign: 'right', color: 'var(--text-muted)', fontWeight: 500 }}>
+                                {row.benchVal >= 0 ? '+' : ''}{row.benchVal.toFixed(2)}%
+                              </td>
+                              <td style={{ padding: '12px 16px', textAlign: 'right', color: 'var(--text-muted)', fontWeight: 500 }}>
+                                {row.niftyVal >= 0 ? '+' : ''}{row.niftyVal.toFixed(2)}%
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  );
+                })()}
+              </div>
+            </div>
+          )}
+
           {selectedPortfolioId === 'custom-uploaded' && (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '24px', marginBottom: '24px' }}>
               {/* Schemes Weights List */}
