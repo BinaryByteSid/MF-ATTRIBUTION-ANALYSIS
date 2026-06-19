@@ -1437,6 +1437,28 @@ export const AttributionDashboard: React.FC = () => {
         return cum - 1;
       };
 
+      const getPortfolioReturnsFromHoldings = (portfolioHoldings: Holding[]) => {
+        if (portfolioHoldings.length === 0) return [];
+        const retsMap = new Map<string, number>();
+        portfolioHoldings.forEach(h => {
+          const fundReturns = getFundMonthlyReturnsList(h.scheme_name);
+          fundReturns.forEach(r => {
+            const dateKey = `${r.year}-${String(r.month).padStart(2, '0')}`;
+            retsMap.set(dateKey, (retsMap.get(dateKey) || 0) + r.returnVal * h.weight);
+          });
+        });
+        
+        const dates = Array.from(retsMap.keys()).sort();
+        return dates.map(dateKey => {
+          const [y, m] = dateKey.split('-').map(Number);
+          return {
+            year: y,
+            month: m,
+            returnVal: retsMap.get(dateKey) || 0
+          };
+        });
+      };
+
       const filterFn = (r: { year: number; month: number; returnVal: number }) => {
         const d = new Date(r.year, r.month - 1, 15);
         return d >= new Date(dashboardFromDate) && d <= new Date(dashboardToDate);
@@ -1551,7 +1573,7 @@ export const AttributionDashboard: React.FC = () => {
         holds = await getPortfolioHoldings(selectedPortfolioId);
         
         const benchmarkFundName = entityB || 'NIFTY 50 TRI';
-        const retsPortRaw = getEntityMonthlyReturnsList(selectedPortfolioId);
+        const retsPortRaw = getPortfolioReturnsFromHoldings(holds);
         const retsBenchRaw = getEntityMonthlyReturnsList(benchmarkFundName);
 
         const retsPort = retsPortRaw.filter(filterFn);
@@ -1560,12 +1582,12 @@ export const AttributionDashboard: React.FC = () => {
         const aligned = alignReturns(retsPort, retsBench);
         const cumPort = calcCumulative(retsPort);
         
-        const absReturn = cumPort * 100;
-        const cagr = retsPort.length > 0 ? (Math.pow(1 + cumPort, 12 / retsPort.length) - 1) * 100 : 0.0;
-        const xirr = cagr;
+        const absReturn = retsPort.length > 0 ? cumPort * 100 : dbSummary.absolute_return;
+        const cagr = retsPort.length > 0 ? (Math.pow(1 + cumPort, 12 / retsPort.length) - 1) * 100 : dbSummary.cagr;
+        const xirr = retsPort.length > 0 ? cagr : dbSummary.xirr;
 
         const totalValue = holds.reduce((sum, h) => sum + h.current_value, 0);
-        const calculatedInvested = totalValue / (1 + cumPort);
+        const calculatedInvested = retsPort.length > 0 ? totalValue / (1 + cumPort) : dbSummary.total_invested;
 
         summ = {
           ...dbSummary,
