@@ -6,7 +6,6 @@ import {
   getPortfolioSummary,
   getPortfolioHoldings,
   getBrinsonAttribution,
-  getRiskMetrics,
   getFunds,
   getBenchmarks,
   triggerReport,
@@ -1548,25 +1547,43 @@ export const AttributionDashboard: React.FC = () => {
           rsk = calculateRiskMetrics(alignedScheme);
         }
       } else {
-        summ = await getPortfolioSummary(selectedPortfolioId);
+        const dbSummary = await getPortfolioSummary(selectedPortfolioId);
         holds = await getPortfolioHoldings(selectedPortfolioId);
-        brin = await getBrinsonAttribution(selectedPortfolioId);
         
-        if (useDynamicCalculation) {
-          const retsPort = getEntityMonthlyReturnsList(selectedPortfolioId);
-          const retsBench = getEntityMonthlyReturnsList(entityB || 'NIFTY 50 TRI');
-          const aligned = alignReturns(retsPort, retsBench);
-          rsk = calculateRiskMetrics(aligned);
-        } else {
-          rsk = await getRiskMetrics(selectedPortfolioId);
-        }
+        const benchmarkFundName = entityB || 'NIFTY 50 TRI';
+        const retsPortRaw = getEntityMonthlyReturnsList(selectedPortfolioId);
+        const retsBenchRaw = getEntityMonthlyReturnsList(benchmarkFundName);
 
+        const retsPort = retsPortRaw.filter(filterFn);
+        const retsBench = retsBenchRaw.filter(filterFn);
+
+        const aligned = alignReturns(retsPort, retsBench);
+        const cumPort = calcCumulative(retsPort);
+        
+        const absReturn = cumPort * 100;
+        const cagr = retsPort.length > 0 ? (Math.pow(1 + cumPort, 12 / retsPort.length) - 1) * 100 : 0.0;
+        const xirr = cagr;
+
+        const totalValue = holds.reduce((sum, h) => sum + h.current_value, 0);
+        const calculatedInvested = totalValue / (1 + cumPort);
+
+        summ = {
+          ...dbSummary,
+          total_value: totalValue,
+          total_invested: calculatedInvested,
+          absolute_return: parseFloat(absReturn.toFixed(2)),
+          xirr: parseFloat(xirr.toFixed(2)),
+          cagr: parseFloat(cagr.toFixed(2)),
+        };
+
+        brin = await getBrinsonAttribution(selectedPortfolioId);
         if (brin) {
           brin = brin.map((s: any) => ({
             ...s,
             nifty_weight: getNiftySectorWeight(s.asset_class)
           }));
         }
+        rsk = calculateRiskMetrics(aligned);
       }
 
       setSummary(summ);
@@ -2491,7 +2508,7 @@ export const AttributionDashboard: React.FC = () => {
           </div>
 
           {/* Analysis Date Range Selector Section */}
-          {selectedPortfolioId === 'custom-uploaded' && (
+          {(
             <div className="glass-card animate-fade-in-up" style={{ padding: '24px', margin: 0, border: '1px solid rgba(59, 130, 246, 0.2)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
                 <div>
@@ -2568,9 +2585,9 @@ export const AttributionDashboard: React.FC = () => {
               </div>
             </div>
           )}
-
+ 
           {/* Summary Sheet of Excel Report style block */}
-          {selectedPortfolioId === 'custom-uploaded' && summary && risk && (
+          {summary && risk && (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(450px, 1fr))', gap: '24px', marginBottom: '8px' }}>
               {/* Left Card: Fund Profile & Risk Metrics */}
               <div className="glass-card" style={{ margin: 0, padding: '24px' }}>
