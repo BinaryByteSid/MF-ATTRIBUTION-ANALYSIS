@@ -129,6 +129,35 @@ async def download_report(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/risk-metrics")
+async def get_risk_metrics(
+    fund_name: str = Query(..., description="Name of the fund"),
+    from_date: str = Query("2025-12", description="Start date (YYYY-MM)"),
+    to_date: str = Query("2026-04", description="End date (YYYY-MM)"),
+    bench_name: str = Query("", description="Name of the benchmark fund (optional)"),
+    isin: str = Query("", description="ISIN of the fund (optional)"),
+    bench_isin: str = Query("", description="ISIN of the benchmark fund (optional)"),
+):
+    """
+    Compute and return risk metrics (Sharpe, Sortino, Beta, Alpha, etc.)
+    using the same logic as the Monthly Tracker Excel generator.
+    This ensures the dashboard displays exactly the same values as the Excel report.
+    """
+    try:
+        from app.utils.risk_metrics import compute_dashboard_risk_metrics
+        result = compute_dashboard_risk_metrics(
+            fund_name=fund_name,
+            isin=isin,
+            from_date=from_date,
+            to_date=to_date,
+            bench_name=bench_name,
+            bench_isin=bench_isin,
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to compute risk metrics: {str(e)}")
+
+
 @router.get("/monthly-tracker")
 async def get_monthly_tracker(
     isin: str = Query(..., description="ISIN of the fund"),

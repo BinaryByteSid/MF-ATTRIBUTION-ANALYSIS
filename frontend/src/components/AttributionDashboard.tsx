@@ -1518,7 +1518,33 @@ export const AttributionDashboard: React.FC = () => {
             brinsonBenchmarkType === 'scheme' ? selectedBenchmarkSchemeName : undefined, 
             cumBench
           );
-          rsk = calculateRiskMetrics(aligned);
+          // Fetch risk metrics from backend API for consistency with Excel report
+          try {
+            const apiBaseUrl = API_BASE_URL;
+            const benchNameParam = brinsonBenchmarkType === 'scheme' && selectedBenchmarkSchemeName
+              ? selectedBenchmarkSchemeName : '';
+            const riskUrl = `${apiBaseUrl}/reports/risk-metrics?fund_name=${encodeURIComponent(customFileName || 'Custom Uploaded Portfolio')}&from_date=${dashboardFromDate}&to_date=${dashboardToDate}&bench_name=${encodeURIComponent(benchNameParam)}`;
+            const token = localStorage.getItem('access_token');
+            const riskResp = await fetch(riskUrl, {
+              headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+            });
+            if (riskResp.ok) {
+              const riskData = await riskResp.json();
+              rsk = {
+                sharpe_ratio: riskData.sharpe_ratio ?? 0,
+                sortino_ratio: riskData.sortino_ratio ?? 0,
+                max_drawdown: riskData.max_drawdown ?? 0,
+                beta: riskData.beta ?? 1,
+                alpha: riskData.alpha ?? 0,
+                information_ratio: riskData.information_ratio ?? 0,
+                var_95: riskData.var_95 ?? 0,
+              };
+            } else {
+              rsk = calculateRiskMetrics(aligned);
+            }
+          } catch {
+            rsk = calculateRiskMetrics(aligned);
+          }
         } else {
           const scheme = customHoldings.find(h => h.scheme_name === selectedSchemeName);
           if (!scheme) return;
@@ -1571,7 +1597,33 @@ export const AttributionDashboard: React.FC = () => {
           );
 
           const alignedScheme = alignReturns(retsH, retsBenchScheme);
-          rsk = calculateRiskMetrics(alignedScheme);
+          // Fetch risk metrics from backend API for consistency with Excel report
+          try {
+            const apiBaseUrl = API_BASE_URL;
+            const benchNameParam = brinsonBenchmarkType === 'scheme' && selectedBenchmarkSchemeName
+              ? selectedBenchmarkSchemeName : '';
+            const riskUrl = `${apiBaseUrl}/reports/risk-metrics?fund_name=${encodeURIComponent(scheme.scheme_name)}&from_date=${dashboardFromDate}&to_date=${dashboardToDate}&bench_name=${encodeURIComponent(benchNameParam)}`;
+            const token = localStorage.getItem('access_token');
+            const riskResp = await fetch(riskUrl, {
+              headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+            });
+            if (riskResp.ok) {
+              const riskData = await riskResp.json();
+              rsk = {
+                sharpe_ratio: riskData.sharpe_ratio ?? 0,
+                sortino_ratio: riskData.sortino_ratio ?? 0,
+                max_drawdown: riskData.max_drawdown ?? 0,
+                beta: riskData.beta ?? 1,
+                alpha: riskData.alpha ?? 0,
+                information_ratio: riskData.information_ratio ?? 0,
+                var_95: riskData.var_95 ?? 0,
+              };
+            } else {
+              rsk = calculateRiskMetrics(alignedScheme);
+            }
+          } catch {
+            rsk = calculateRiskMetrics(alignedScheme);
+          }
         }
       } else {
         const dbSummary = await getPortfolioSummary(selectedPortfolioId);
@@ -1610,7 +1662,33 @@ export const AttributionDashboard: React.FC = () => {
             nifty_weight: getNiftySectorWeight(s.asset_class)
           }));
         }
-        rsk = calculateRiskMetrics(aligned);
+        // Fetch risk metrics from backend API for consistency with Excel report
+        try {
+          const apiBaseUrl = API_BASE_URL;
+          const fundName = holds.length > 0 ? holds[0].scheme_name : selectedPortfolioId;
+          const benchNameParam = entityB || '';
+          const riskUrl = `${apiBaseUrl}/reports/risk-metrics?fund_name=${encodeURIComponent(fundName)}&from_date=${dashboardFromDate}&to_date=${dashboardToDate}&bench_name=${encodeURIComponent(benchNameParam)}`;
+          const token = localStorage.getItem('access_token');
+          const riskResp = await fetch(riskUrl, {
+            headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+          });
+          if (riskResp.ok) {
+            const riskData = await riskResp.json();
+            rsk = {
+              sharpe_ratio: riskData.sharpe_ratio ?? 0,
+              sortino_ratio: riskData.sortino_ratio ?? 0,
+              max_drawdown: riskData.max_drawdown ?? 0,
+              beta: riskData.beta ?? 1,
+              alpha: riskData.alpha ?? 0,
+              information_ratio: riskData.information_ratio ?? 0,
+              var_95: riskData.var_95 ?? 0,
+            };
+          } else {
+            rsk = calculateRiskMetrics(aligned);
+          }
+        } catch {
+          rsk = calculateRiskMetrics(aligned);
+        }
       }
 
       setSummary(summ);
