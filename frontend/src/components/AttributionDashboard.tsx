@@ -1459,9 +1459,14 @@ export const AttributionDashboard: React.FC = () => {
         });
       };
 
+      const [fromY, fromM] = dashboardFromDate.split('-').map(Number);
+      const [toY, toM] = dashboardToDate.split('-').map(Number);
+      const fromVal = fromY * 100 + fromM;
+      const toVal = toY * 100 + toM;
+
       const filterFn = (r: { year: number; month: number; returnVal: number }) => {
-        const d = new Date(r.year, r.month - 1, 15);
-        return d >= new Date(dashboardFromDate) && d <= new Date(dashboardToDate);
+        const rVal = r.year * 100 + r.month;
+        return rVal >= fromVal && rVal <= toVal;
       };
 
       if (selectedPortfolioId === 'custom-uploaded') {
@@ -2700,9 +2705,14 @@ export const AttributionDashboard: React.FC = () => {
                   const retsBenchRaw = getEntityMonthlyReturnsList(benchmarkFundName);
                   const retsNiftyRaw = getEntityMonthlyReturnsList('NIFTY 50 TRI');
 
+                  const [fromY, fromM] = dashboardFromDate.split('-').map(Number);
+                  const [toY, toM] = dashboardToDate.split('-').map(Number);
+                  const fromVal = fromY * 100 + fromM;
+                  const toVal = toY * 100 + toM;
+
                   const filterFn = (r: any) => {
-                    const d = new Date(r.year, r.month - 1, 15);
-                    return d >= new Date(dashboardFromDate) && d <= new Date(dashboardToDate);
+                    const rVal = r.year * 100 + r.month;
+                    return rVal >= fromVal && rVal <= toVal;
                   };
                   const retsPort = retsPortRaw.filter(filterFn);
                   const retsBench = retsBenchRaw.filter(filterFn);
