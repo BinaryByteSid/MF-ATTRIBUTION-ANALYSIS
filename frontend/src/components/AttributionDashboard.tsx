@@ -2056,16 +2056,28 @@ export const AttributionDashboard: React.FC = () => {
         headers['Authorization'] = `Bearer ${token}`;
       }
 
-      const formData = new FormData();
-      if (uploadedFile) {
-        formData.append('file', uploadedFile);
+      let response;
+      try {
+        const formData = new FormData();
+        if (uploadedFile) {
+          formData.append('file', uploadedFile);
+        }
+
+        response = await fetch(url, {
+          method: 'POST',
+          body: formData,
+          headers: headers,
+        });
+      } catch (postError) {
+        console.warn("POST monthly-tracker failed, falling back to GET:", postError);
       }
 
-      const response = await fetch(url, {
-        method: 'POST',
-        body: formData,
-        headers: headers,
-      });
+      if (!response || response.status === 405 || response.status === 404) {
+        response = await fetch(url, {
+          method: 'GET',
+          headers: headers,
+        });
+      }
       
       if (!response.ok) {
         const errorText = await response.text();
