@@ -670,6 +670,7 @@ export const AttributionDashboard: React.FC = () => {
     }));
   };
   const [funds, setFunds] = useState<Fund[]>([]);
+  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [benchmarks, setBenchmarks] = useState<any[]>([]);
   
   const [navMap, setNavMap] = useState<Map<string, { nav: number; name: string; category: string }>>(new Map());
@@ -1966,6 +1967,8 @@ export const AttributionDashboard: React.FC = () => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    setUploadedFile(file);
+
     // Clear caches when a new portfolio is uploaded
     stockMatchCache.current.clear();
     fundReturnsCache.current.clear();
@@ -2048,8 +2051,20 @@ export const AttributionDashboard: React.FC = () => {
       setReportProgress(50);
       
       const token = localStorage.getItem('access_token');
+      const headers: Record<string, string> = {};
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      const formData = new FormData();
+      if (uploadedFile) {
+        formData.append('file', uploadedFile);
+      }
+
       const response = await fetch(url, {
-        headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+        method: 'POST',
+        body: formData,
+        headers: headers,
       });
       
       if (!response.ok) {

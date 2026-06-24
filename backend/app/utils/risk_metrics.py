@@ -1,7 +1,9 @@
 """
-Lightweight risk metrics computation that matches tracker_excel.py logic exactly.
+Lightweight risk metrics computation using real NAV data from AMFI API.
 Used by the /reports/risk-metrics API endpoint so the frontend dashboard
 displays the same values as the generated Excel report.
+
+Falls back to Nifty-based approximation if NAV fetch fails.
 """
 
 import os
@@ -21,7 +23,7 @@ def compute_dashboard_risk_metrics(
 ) -> dict:
     """
     Compute risk metrics (Sharpe, Sortino, Beta, Alpha, Info Ratio, etc.)
-    using the same logic as generate_monthly_tracker_excel.
+    using real NAV data from AMFI API.
 
     Returns a dict with keys:
         sharpe_ratio, sortino_ratio, beta, alpha, information_ratio,
@@ -29,77 +31,11 @@ def compute_dashboard_risk_metrics(
         fund_return_annual, benchmark_return_annual,
         monthly_returns (list of {date, fund_return, bench_return})
     """
-    # ── Locate data files ─────────────────────────────────────────────────
-    base_dir = Path(__file__).resolve().parents[3]
-    possible_template_dirs = [
-        Path(__file__).resolve().parent.parent / "templates",
-        base_dir / "FUNDS PERFORMANCE ANALYSIS",
-        base_dir,
-    ]
-
-    nifty_csv_path = None
-    for d in possible_template_dirs:
-        candidate = d / "NIFTY50_2025-06-01_to_2026-06-01.csv"
-        if candidate.exists():
-            nifty_csv_path = str(candidate)
-            break
-
-    # ── Load Nifty CSV ────────────────────────────────────────────────────
-    df_nifty = None
-    if nifty_csv_path and os.path.exists(nifty_csv_path):
-        try:
-            df_nifty = pd.read_csv(nifty_csv_path)
-            df_nifty['Date'] = pd.to_datetime(df_nifty['Date'], errors='coerce')
-            df_nifty = df_nifty.dropna(subset=['Date']).reset_index(drop=True)
-            df_nifty = df_nifty.sort_values('Date').reset_index(drop=True)
-        except Exception as e:
-            print("Error loading Nifty CSV:", e)
-
-    def get_nifty_close(date_val) -> float:
-        if df_nifty is None:
-            date_str = pd.to_datetime(date_val).strftime("%Y-%m-%d")
-            fallbacks = {
-                "2026-01-30": 25320.65, "2025-12-31": 26129.60,
-                "2025-11-28": 26202.95, "2025-10-31": 25722.05,
-                "2025-09-30": 24611.10, "2025-07-31": 24768.35,
-                "2025-04-01": 23519.34, "2021-01-01": 14018.50
-            }
-            return fallbacks.get(date_str, 25000.0)
-        date_val = pd.to_datetime(date_val)
-        if date_val == pd.to_datetime("2021-01-01"):
-            return 14018.5
-        if date_val == pd.to_datetime("2025-04-01"):
-            return 23519.34
-        match = df_nifty[df_nifty['Date'] <= date_val]
-        if not match.empty:
-            return float(match.iloc[-1]['Close'])
-        return float(df_nifty.iloc[0]['Close'])
-
-    def get_last_trading_day(year: int, month: int) -> pd.Timestamp:
-        if df_nifty is not None:
-            dates = pd.DatetimeIndex(df_nifty['Date'])
-            match = df_nifty[(dates.year == year) & (dates.month == month)]
-            if not match.empty:
-                return match.sort_values('Date').iloc[-1]['Date']
-        last_day = calendar.monthrange(year, month)[1]
-        return pd.Timestamp(year, month, last_day)
-
-    # ── Deterministic seed (matches tracker_excel.py's get_fund_seed) ────
-    def get_fund_seed(name: str) -> int:
-        hash_val = 0
-        for char in name:
-            hash_val = ord(char) + ((hash_val << 5) - hash_val)
-            hash_val = hash_val & 0xFFFFFFFF
-        if hash_val > 0x7FFFFFFF:
-            hash_val = hash_val - 0x100000000
-        return abs(hash_val) % 100
-
-    seed = get_fund_seed(fund_name)
-    is_hdfc = 'hdfc' in fund_name.lower() and 'mid' in fund_name.lower()
-
     # ── Parse date range ──────────────────────────────────────────────────
-    from_y, from_m = map(int, from_date.split("-"))
-    to_y, to_m = map(int, to_date.split("-"))
+    from_parts = from_date.split("-")
+    from_y, from_m = int(from_parts[0]), int(from_parts[1])
+    to_parts = to_date.split("-")
+    to_y, to_m = int(to_parts[0]), int(to_parts[1])
 
     months_list = []
     y, m = from_y, from_m
@@ -110,71 +46,130 @@ def compute_dashboard_risk_metrics(
             m = 1
             y += 1
 
-    # ── Compute monthly fund and benchmark returns ────────────────────────
-    monthly_fund_returns = []
-    monthly_bench_returns = []  # use selected benchmark or nifty
-    monthly_labels = []
+    # ── Try to use real NAV data ──────────────────────────────────────────
+    try:
+        from app.utils.nav_fetcher import (
+            fetch_fund_and_bench_returns,
+            get_monthly_returns as nav_get_monthly_returns,
+            _get_nav_history_for_fund,
+        )
 
-    for year, month in months_list:
-        d_end = get_last_trading_day(year, month)
-        c_end = get_nifty_close(d_end)
+        print(f"[risk_metrics] Fetching real NAV for {fund_name} (ISIN={isin})")
+        last_year, last_month = months_list[-1]
 
-        # 1 Month nifty return
-        y_1m = year if month > 1 else year - 1
-        m_1m = month - 1 if month > 1 else 12
-        d_1m = get_last_trading_day(y_1m, m_1m)
-        c_1m = get_nifty_close(d_1m)
-        nifty_1m = (c_end / c_1m - 1) * 100
+        nav_result = fetch_fund_and_bench_returns(
+            fund_isin=isin,
+            fund_name=fund_name,
+            bench_isin=bench_isin,
+            bench_name=bench_name,
+            year=last_year,
+            month=last_month,
+            months_list=months_list,
+        )
 
-        # Benchmark 1M return (nifty - 0.1 spread, matches tracker_excel.py)
-        bench_1m = nifty_1m - 0.1
+        fund_nav_history = nav_result.get("fund_nav_history", [])
+        bench_nav_history = nav_result.get("bench_nav_history", [])
 
-        # Override Dec 25 / Jan 26 returns to match template exactly
-        if year == 2025 and month == 12:
-            nifty_1m_pct = -0.27993
-            bench_1m_pct = -0.25759
-        elif year == 2026 and month == 1:
-            nifty_1m_pct = -3.09591
-            bench_1m_pct = -3.31797
-        else:
-            nifty_1m_pct = nifty_1m
-            bench_1m_pct = bench_1m
+        if fund_nav_history:
+            # Get monthly returns from real NAV
+            fund_monthly_raw = nav_get_monthly_returns(fund_nav_history, months_list)
+            monthly_fund_returns = [r for r in fund_monthly_raw if r is not None]
+            monthly_labels = [
+                f"{y}-{str(m).zfill(2)}"
+                for (y, m), r in zip(months_list, fund_monthly_raw)
+                if r is not None
+            ]
 
-        # Fund 1M return: nifty + active offset (matches tracker_excel.py)
-        if is_hdfc:
-            if year == 2025 and month == 12:
-                fund_1m_pct = -0.3109
-            elif year == 2026 and month == 1:
-                fund_1m_pct = -1.324
+            if bench_nav_history:
+                bench_monthly_raw = nav_get_monthly_returns(bench_nav_history, months_list)
+                monthly_bench_returns = [r for r in bench_monthly_raw if r is not None]
             else:
-                active_1m = 1.7
-                fund_1m_pct = nifty_1m_pct + active_1m
+                # Fall back to Nifty for benchmark
+                monthly_bench_returns = _compute_nifty_monthly_returns(months_list)
+
+            # Align lengths
+            min_len = min(len(monthly_fund_returns), len(monthly_bench_returns))
+            monthly_fund_returns = monthly_fund_returns[:min_len]
+            monthly_bench_returns = monthly_bench_returns[:min_len]
+            monthly_labels = monthly_labels[:min_len]
+
+            if min_len >= 2:
+                print(f"[risk_metrics] Computing from {min_len} months of REAL NAV data")
+                return _compute_risk_from_returns(
+                    monthly_fund_returns,
+                    monthly_bench_returns,
+                    monthly_labels,
+                )
+            else:
+                print(f"[risk_metrics] Not enough real NAV data ({min_len} months), falling back")
         else:
-            active_1m = (seed % 3 - 1) * 0.2
-            fund_1m_pct = nifty_1m_pct + active_1m
+            print(f"[risk_metrics] No NAV data found for {fund_name}, falling back")
 
-        monthly_fund_returns.append(fund_1m_pct / 100.0)  # Convert to decimal
-        monthly_bench_returns.append(bench_1m_pct / 100.0)
-        monthly_labels.append(f"{year}-{str(month).zfill(2)}")
+    except Exception as e:
+        print(f"[risk_metrics] NAV fetch failed: {e}, falling back to Nifty-based method")
 
-    # ── Compute risk metrics (same formulas as tracker_excel.py) ──────────
+    # ── Fallback: Nifty-based computation ─────────────────────────────────
+    return _compute_fallback_risk_metrics(
+        fund_name=fund_name,
+        isin=isin,
+        months_list=months_list,
+        bench_name=bench_name,
+    )
+
+
+def _compute_nifty_monthly_returns(months_list: list) -> list:
+    """Compute Nifty monthly returns from CSV if available."""
+    base_dir = Path(__file__).resolve().parents[3]
+    possible_dirs = [
+        Path(__file__).resolve().parent.parent / "templates",
+        base_dir / "FUNDS PERFORMANCE ANALYSIS",
+        base_dir,
+    ]
+
+    df_nifty = None
+    for d in possible_dirs:
+        candidate = d / "NIFTY50_2025-06-01_to_2026-06-01.csv"
+        if candidate.exists():
+            try:
+                df_nifty = pd.read_csv(str(candidate))
+                df_nifty['Date'] = pd.to_datetime(df_nifty['Date'], errors='coerce')
+                df_nifty = df_nifty.dropna(subset=['Date']).sort_values('Date').reset_index(drop=True)
+            except Exception:
+                pass
+            break
+
+    if df_nifty is None:
+        return [0.0] * len(months_list)
+
+    returns = []
+    for year, month in months_list:
+        dates = pd.DatetimeIndex(df_nifty['Date'])
+        month_data = df_nifty[(dates.year == year) & (dates.month == month)]
+
+        prev_y = year if month > 1 else year - 1
+        prev_m = month - 1 if month > 1 else 12
+        prev_data = df_nifty[(dates.year == prev_y) & (dates.month == prev_m)]
+
+        if not month_data.empty and not prev_data.empty:
+            c_end = float(month_data.sort_values('Date').iloc[-1]['Close'])
+            c_start = float(prev_data.sort_values('Date').iloc[-1]['Close'])
+            if c_start > 0:
+                returns.append(c_end / c_start - 1.0)
+            else:
+                returns.append(0.0)
+        else:
+            returns.append(0.0)
+
+    return returns
+
+
+def _compute_risk_from_returns(
+    monthly_fund_returns: list,
+    monthly_bench_returns: list,
+    monthly_labels: list,
+) -> dict:
+    """Compute all risk metrics from monthly return series."""
     n = len(monthly_fund_returns)
-    result = {
-        "sharpe_ratio": 0.0,
-        "sortino_ratio": 0.0,
-        "beta": 1.0,
-        "alpha": 0.0,
-        "information_ratio": 0.0,
-        "max_drawdown": 0.0,
-        "var_95": 0.0,
-        "std_dev_annual": 0.0,
-        "fund_return_annual": 0.0,
-        "benchmark_return_annual": 0.0,
-        "monthly_returns": [],
-    }
-
-    if n < 2:
-        return result
 
     def _mean(arr):
         return sum(arr) / len(arr)
@@ -265,12 +260,12 @@ def compute_dashboard_risk_metrics(
     monthly_returns_data = []
     for i in range(n):
         monthly_returns_data.append({
-            "date": monthly_labels[i],
+            "date": monthly_labels[i] if i < len(monthly_labels) else f"Month-{i}",
             "fund_return": round(monthly_fund_returns[i], 6),
             "bench_return": round(monthly_bench_returns[i], 6),
         })
 
-    result = {
+    return {
         "sharpe_ratio": round(risk_sharpe, 2),
         "sortino_ratio": round(sortino, 2),
         "beta": round(risk_beta, 2),
@@ -284,4 +279,56 @@ def compute_dashboard_risk_metrics(
         "monthly_returns": monthly_returns_data,
     }
 
-    return result
+
+def _compute_fallback_risk_metrics(
+    fund_name: str,
+    isin: str,
+    months_list: list,
+    bench_name: str = "",
+) -> dict:
+    """Fallback: compute risk metrics using Nifty CSV + seed-based fund returns."""
+    # Deterministic seed (matches tracker_excel.py's get_fund_seed)
+    def get_fund_seed(name: str) -> int:
+        hash_val = 0
+        for char in name:
+            hash_val = ord(char) + ((hash_val << 5) - hash_val)
+            hash_val = hash_val & 0xFFFFFFFF
+        if hash_val > 0x7FFFFFFF:
+            hash_val = hash_val - 0x100000000
+        return abs(hash_val) % 100
+
+    seed = get_fund_seed(fund_name)
+
+    # Get Nifty monthly returns
+    nifty_returns = _compute_nifty_monthly_returns(months_list)
+
+    # Generate fund returns using seed offset
+    active_1m = (seed % 3 - 1) * 0.002  # 0.2% in decimal
+    monthly_fund_returns = [r + active_1m for r in nifty_returns]
+
+    # Benchmark = nifty - 0.001
+    monthly_bench_returns = [r - 0.001 for r in nifty_returns]
+
+    monthly_labels = [f"{y}-{str(m).zfill(2)}" for y, m in months_list]
+
+    n = len(monthly_fund_returns)
+    if n < 2:
+        return {
+            "sharpe_ratio": 0.0,
+            "sortino_ratio": 0.0,
+            "beta": 1.0,
+            "alpha": 0.0,
+            "information_ratio": 0.0,
+            "max_drawdown": 0.0,
+            "var_95": 0.0,
+            "std_dev_annual": 0.0,
+            "fund_return_annual": 0.0,
+            "benchmark_return_annual": 0.0,
+            "monthly_returns": [],
+        }
+
+    return _compute_risk_from_returns(
+        monthly_fund_returns,
+        monthly_bench_returns,
+        monthly_labels,
+    )

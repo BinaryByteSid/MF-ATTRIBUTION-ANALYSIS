@@ -5,6 +5,21 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 import pandas as pd
 import calendar
 
+# Real NAV data fetcher
+try:
+    from app.utils.nav_fetcher import (
+        fetch_fund_and_bench_returns,
+        compute_fund_returns as nav_compute_fund_returns,
+        get_monthly_returns as nav_get_monthly_returns,
+        compute_risk_metrics_from_nav,
+        _get_nav_history_for_fund,
+        get_month_end_nav,
+    )
+    NAV_FETCHER_AVAILABLE = True
+except ImportError:
+    NAV_FETCHER_AVAILABLE = False
+    print("[tracker_excel] nav_fetcher not available, will use fallback data")
+
 # Normalize sector helper
 def normalize_sector(sec: str) -> str:
     s = sec.lower()
@@ -221,7 +236,7 @@ def populate_vertical_metadata_table(ws, fund_name, isin, aum_label, aum, exr, m
         else:
             val_c.alignment = Alignment(horizontal="left")
 
-def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str, output_path: str, from_date: str = "2025-12", to_date: str = "2026-04", bench_isin: str = "", bench_name: str = ""):
+def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str, output_path: str, from_date: str = "2025-12", to_date: str = "2026-04", bench_isin: str = "", bench_name: str = "", uploaded_file_path: str = None):
     # 0. Load pre-processed monthly stock prices
     df_prices = None
     try:
@@ -336,16 +351,73 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
     while (cy < end_year) or (cy == end_year and cm <= end_month):
         months_list.append((cy, cm))
         cm += 1
+
+    # ── Prefetch real NAV data from AMFI API ─────────────────────────────────
+    _nav_fund_rets_cache = {}   # { (year, month): [SI, FYTD, 6M, 3M, 1M] }
+    _nav_bench_rets_cache = {}  # { (year, month): [SI, FYTD, 6M, 3M, 1M] }
+    _nav_fund_monthly_returns = []   # 1-month decimal returns
+    _nav_bench_monthly_returns = []  # 1-month decimal returns
+    _nav_risk_metrics = None
+    _nav_fund_nav_current = None
+    _use_real_nav = False
+
+    if NAV_FETCHER_AVAILABLE:
+        try:
+            print(f"[tracker_excel] Fetching real NAV for fund ISIN={isin}, name={fund_name}")
+            last_year, last_month = months_list[-1]
+            nav_result = fetch_fund_and_bench_returns(
+                fund_isin=isin,
+                fund_name=fund_name,
+                bench_isin=bench_isin,
+                bench_name=bench_name,
+                year=last_year,
+                month=last_month,
+                months_list=months_list,
+            )
+
+            # Cache per-month fund returns
+            fund_nav_history = nav_result.get("fund_nav_history", [])
+            bench_nav_history = nav_result.get("bench_nav_history", [])
+
+            if fund_nav_history:
+                _use_real_nav = True
+                _nav_fund_nav_current = nav_result.get("fund_nav_current")
+                print(f"[tracker_excel] Real NAV data loaded: {len(fund_nav_history)} fund entries, {len(bench_nav_history)} bench entries")
+
+                # Compute returns for each month in the range
+                for yr, mo in months_list:
+                    fr = nav_compute_fund_returns(
+                        isin=isin, name=fund_name,
+                        year=yr, month=mo,
+                        nav_history=fund_nav_history,
+                    )
+                    if fr.get("fund_rets"):
+                        _nav_fund_rets_cache[(yr, mo)] = fr["fund_rets"]
+
+                    if bench_nav_history:
+                        br = nav_compute_fund_returns(
+                            isin=bench_isin, name=bench_name,
+                            year=yr, month=mo,
+                            nav_history=bench_nav_history,
+                        )
+                        if br.get("fund_rets"):
+                            _nav_bench_rets_cache[(yr, mo)] = br["fund_rets"]
+
+                # Get monthly returns for risk metrics
+                _nav_fund_monthly_returns = nav_result.get("fund_monthly_returns", [])
+                _nav_bench_monthly_returns = nav_result.get("bench_monthly_returns", [])
+                _nav_risk_metrics = nav_result.get("risk_metrics")
+            else:
+                print(f"[tracker_excel] No NAV data found for {fund_name}, falling back to seed-based data")
+
+        except Exception as e:
+            print(f"[tracker_excel] NAV fetch failed: {e}, falling back to seed-based data")
+            _use_real_nav = False
         if cm > 12:
             cm = 1
             cy += 1
 
-    # Check if HDFC Flexi is chosen. If so, and we just want 2 months, we just save the original workbook as-is!
     is_hdfc = "hdfc flexi" in fund_name.lower() or isin.strip().upper() in ["INF179K011R0", "INF179K01608"]
-    if is_hdfc and len(months_list) == 2:
-        wb.save(output_path)
-        wb.close()
-        return
 
     # Columns variables defaults
     isin_col = 'SD_Scheme ISIN'
@@ -359,14 +431,36 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
     company_isin_col = 'PD_Company ISIN no'
     mcap_type_col = 'PD_Instrument SEBI Mcap Type'
 
-    # Load portfolio holdings details from Desktop
+    # Load portfolio holdings details from Desktop or uploaded file
     df_port = None
     stock_to_raw_sector = {}
     try:
-        dir_name = os.path.dirname(template_path)
-        port_excel_path = os.path.join(os.path.dirname(dir_name), "portfolio last 6 months.xlsx")
+        if uploaded_file_path and os.path.exists(uploaded_file_path):
+            port_excel_path = uploaded_file_path
+            print(f"[tracker_excel] Reading uploaded portfolio file: {port_excel_path}")
+        else:
+            dir_name = os.path.dirname(template_path)
+            port_excel_path = os.path.join(os.path.dirname(dir_name), "portfolio last 6 months.xlsx")
+            print(f"[tracker_excel] Reading default portfolio file: {port_excel_path}")
+
         if os.path.exists(port_excel_path):
-            df_port = pd.read_excel(port_excel_path, header=3)
+            is_csv = port_excel_path.lower().endswith('.csv')
+            if is_csv:
+                df_raw = pd.read_csv(port_excel_path, header=None)
+            else:
+                df_raw = pd.read_excel(port_excel_path, header=None)
+                
+            header_idx = 0
+            for idx, row in df_raw.iterrows():
+                row_str = [str(val).lower() for val in row if pd.notna(val)]
+                if any('isin' in val for val in row_str):
+                    header_idx = idx
+                    break
+                    
+            if is_csv:
+                df_port = pd.read_csv(port_excel_path, skiprows=header_idx)
+            else:
+                df_port = pd.read_excel(port_excel_path, header=header_idx)
             
             # Helper to match columns dynamically
             def get_col_name(df, candidates, default):
@@ -626,18 +720,17 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
             latest_bench_exr = bench_exr
             latest_bench_manager = bench_manager if bench_manager else "Benchmark Mgr."
 
-        # Dynamic returns
+        # ── Dynamic returns: Use real NAV data if available, else Nifty-based fallback ──
         d_end = get_last_trading_day(year, month)
         c_end = get_nifty_close(d_end)
         
-        # 1 Month
+        # Nifty returns (always computed for reference / fallback)
         y_1m = year if month > 1 else year - 1
         m_1m = month - 1 if month > 1 else 12
         d_1m = get_last_trading_day(y_1m, m_1m)
         c_1m = get_nifty_close(d_1m)
         nifty_1m = (c_end / c_1m - 1) * 100
         
-        # 3 Month
         y_3m, m_3m = year, month - 3
         if m_3m <= 0:
             m_3m += 12
@@ -646,7 +739,6 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
         c_3m = get_nifty_close(d_3m)
         nifty_3m = (c_end / c_3m - 1) * 100
         
-        # 6 Month
         y_6m, m_6m = year, month - 6
         if m_6m <= 0:
             m_6m += 12
@@ -655,76 +747,36 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
         c_6m = get_nifty_close(d_6m)
         nifty_6m = (c_end / c_6m - 1) * 100
         
-        # FYTD
         fy_year = year if month >= 4 else year - 1
         d_fy = pd.Timestamp(fy_year, 4, 1)
         c_fy = get_nifty_close(d_fy)
         nifty_fy = (c_end / c_fy - 1) * 100
         
-        # SI (CAGR)
         d_si = pd.Timestamp(2021, 1, 1)
         c_si = get_nifty_close(d_si)
         days_si = (d_end - d_si).days
         years_si = days_si / 365.0
         nifty_si = ((c_end / c_si) ** (1.0 / years_si) - 1.0) * 100.0
 
-        # Spreads for Benchmark & Category
-        bench_1m = nifty_1m - 0.1
-        bench_3m = nifty_3m - 1.1
-        bench_6m = nifty_6m - 1.4
-        bench_fy = nifty_fy + 0.6
-        bench_si = nifty_si + 2.3
-        
-        cat_1m = nifty_1m - 0.2
-        cat_3m = nifty_3m - 2.0
-        cat_6m = nifty_6m - 2.8
-        cat_fy = nifty_fy - 0.1
-        cat_si = nifty_si + 2.7
+        nifty_rets = [round(nifty_si, 4), round(nifty_fy, 4), round(nifty_6m, 4), round(nifty_3m, 4), round(nifty_1m, 4)]
 
-        # Overwrite Dec 25 / Jan 26 returns to match original templates exactly
-        if year == 2025 and month == 12:
-            nifty_rets = [13.322, 11.098286, 2.400534, 6.169973, -0.27993]
-            bench_rets = [15.6907, 11.865295, 1.07697, 5.003277, -0.25759]
-            cat_rets = [16.084371, 11.17951, 0.545695, 3.357079, -0.850632]
-        elif year == 2026 and month == 1:
-            nifty_rets = [12.392423, 7.658783, 2.229852, -1.56072, -3.09591]
-            bench_rets = [14.651032, 8.153638, 0.718089, -2.660861, -3.31797]
-            cat_rets = [15.075675, 7.580334, -0.644249, -3.408773, -3.178926]
+        # ── FUND RETURNS: Real NAV if available, else seed-based fallback ──
+        if _use_real_nav and (year, month) in _nav_fund_rets_cache:
+            fund_rets_raw = _nav_fund_rets_cache[(year, month)]
+            # Replace any None values with fallback
+            fund_rets = [
+                fund_rets_raw[i] if fund_rets_raw[i] is not None
+                else nifty_rets[i] + (seed % 3 - 1) * 0.2
+                for i in range(5)
+            ]
+            print(f"[tracker_excel] Using REAL NAV returns for {fund_name} ({year}-{month:02d}): {fund_rets}")
         else:
-            nifty_rets = [round(nifty_si, 4), round(nifty_fy, 4), round(nifty_6m, 4), round(nifty_3m, 4), round(nifty_1m, 4)]
-            bench_rets = [round(bench_si, 4), round(bench_fy, 4), round(bench_6m, 4), round(bench_3m, 4), round(bench_1m, 4)]
-            cat_rets = [round(cat_si, 4), round(cat_fy, 4), round(cat_6m, 4), round(cat_3m, 4), round(cat_1m, 4)]
-
-        # Ranks
-        rank_den_si, rank_den_fy, rank_den_6m, rank_den_3m, rank_den_1m = 24, 39, 40, 41, 41
-        rank_num_si = max(1, min(rank_den_si, (seed % 6) + 1))
-        rank_num_fy = max(1, min(rank_den_fy, (seed % 15) + 1))
-        rank_num_6m = max(1, min(rank_den_6m, (seed % 10) + 1))
-        rank_num_3m = max(1, min(rank_den_3m, (seed % 12) + 1))
-        rank_num_1m = max(1, min(rank_den_1m, (seed % 14) + 1))
-
-        # Fund returns
-        active_si = (seed % 8 - 3) * 1.2
-        active_fy = (seed % 6 - 2) * 0.8
-        active_6m = (seed % 5 - 2) * 0.5
-        active_3m = (seed % 4 - 1.5) * 0.4
-        active_1m = (seed % 3 - 1) * 0.2
-
-        if is_hdfc:
-            if year == 2025 and month == 12:
-                fund_rets = [23.685886, 12.24838, 3.681729, 3.462356, -0.3109]
-            elif year == 2026 and month == 1:
-                fund_rets = [22.93286, 10.762212, 3.846714, -1.1563, -1.324]
-            else:
-                active_si, active_fy, active_6m, active_3m, active_1m = 10.5, 3.1, 1.6, 0.4, 1.7
-                fund_rets = [
-                    round(nifty_rets[0] + active_si, 4),
-                    round(nifty_rets[1] + active_fy, 4),
-                    round(nifty_rets[2] + active_6m, 4),
-                    round(nifty_rets[3] + active_3m, 4),
-                    round(nifty_rets[4] + active_1m, 4)
-                ]
-        else:
+            # Fallback: seed-based
+            active_si = (seed % 8 - 3) * 1.2
+            active_fy = (seed % 6 - 2) * 0.8
+            active_6m = (seed % 5 - 2) * 0.5
+            active_3m = (seed % 4 - 1.5) * 0.4
+            active_1m = (seed % 3 - 1) * 0.2
             fund_rets = [
                 round(nifty_rets[0] + active_si, 4),
                 round(nifty_rets[1] + active_fy, 4),
@@ -732,6 +784,34 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
                 round(nifty_rets[3] + active_3m, 4),
                 round(nifty_rets[4] + active_1m, 4)
             ]
+
+        # ── BENCHMARK RETURNS: Real NAV if available, else Nifty-spread fallback ──
+        if _use_real_nav and (year, month) in _nav_bench_rets_cache:
+            bench_rets_raw = _nav_bench_rets_cache[(year, month)]
+            bench_rets = [
+                bench_rets_raw[i] if bench_rets_raw[i] is not None
+                else nifty_rets[i] - 0.1
+                for i in range(5)
+            ]
+        else:
+            bench_rets = [
+                round(nifty_rets[0] + 2.3, 4),
+                round(nifty_rets[1] + 0.6, 4),
+                round(nifty_rets[2] - 1.4, 4),
+                round(nifty_rets[3] - 1.1, 4),
+                round(nifty_rets[4] - 0.1, 4)
+            ]
+
+        # ── CATEGORY RETURNS: Approximate as midpoint between fund and benchmark ──
+        cat_rets = [
+            round((fund_rets[i] + bench_rets[i]) / 2 - 0.3, 4) if fund_rets[i] is not None and bench_rets[i] is not None
+            else round(nifty_rets[i] - 0.2, 4)
+            for i in range(5)
+        ]
+
+        # ── CATEGORY RANK: Not computable without full category data ──
+        rank_den_si, rank_den_fy, rank_den_6m, rank_den_3m, rank_den_1m = "N/A", "N/A", "N/A", "N/A", "N/A"
+        rank_num_si, rank_num_fy, rank_num_6m, rank_num_3m, rank_num_1m = "N/A", "N/A", "N/A", "N/A", "N/A"
 
         # Populate returns
         for idx, row_num in enumerate([7, 8, 9, 10, 11]):
@@ -1363,69 +1443,77 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
         else:
             monthly_sheet_std_dev[sheet_name] = None  # not enough data for 1 month
 
-    # ── Compute Diagnostics Risk Matrix from accumulated monthly returns ──────
+    # ── Compute Diagnostics Risk Matrix ─────────────────────────────────────────
+    # Prefer real NAV-based risk metrics, fall back to accumulated monthly returns
     risk_sharpe = 0.0
     risk_info_ratio = 0.0
     risk_beta = 1.0
     risk_alpha = 0.0
+    std_dev = None
+
+    if _use_real_nav and _nav_risk_metrics:
+        # Use real NAV-based risk metrics
+        risk_sharpe = _nav_risk_metrics.get("sharpe_ratio", 0.0)
+        risk_info_ratio = _nav_risk_metrics.get("information_ratio", 0.0)
+        risk_beta = _nav_risk_metrics.get("beta", 1.0)
+        risk_alpha = _nav_risk_metrics.get("alpha", 0.0)
+        std_dev = _nav_risk_metrics.get("std_dev_monthly")
+        print(f"[tracker_excel] Using REAL risk metrics: Sharpe={risk_sharpe:.2f}, Beta={risk_beta:.2f}, Alpha={risk_alpha:.2f}, IR={risk_info_ratio:.2f}")
+    else:
+        # Fallback: compute from accumulated monthly returns
+        n = len(monthly_fund_returns)
+        if n >= 2:
+            def _mean(arr):
+                return sum(arr) / len(arr)
+            def _var_s(arr, m):
+                return sum((x - m) ** 2 for x in arr) / (len(arr) - 1)
+            def _std_s(arr, m):
+                return math.sqrt(_var_s(arr, m))
+            def _cov_s(a, ma, b, mb):
+                return sum((a[i] - ma) * (b[i] - mb) for i in range(len(a))) / (len(a) - 1)
+
+            rf_rate = 0.065
+            rf_monthly = rf_rate / 12.0
+
+            mean_port = _mean(monthly_fund_returns)
+            mean_bench = _mean(monthly_nifty_returns)
+
+            excess_port = [r - rf_monthly for r in monthly_fund_returns]
+            mean_excess = _mean(excess_port)
+            std_port = _std_s(monthly_fund_returns, mean_port)
+
+            fund_return = mean_port * 12
+            std_dev = std_port
+            std_dev_annual_calc = std_port * math.sqrt(12)
+            if std_dev_annual_calc > 0.0001:
+                risk_sharpe = (fund_return - rf_rate) / std_dev_annual_calc
+            else:
+                risk_sharpe = 0.0
+
+            var_bench = _var_s(monthly_nifty_returns, mean_bench)
+            cov_pb = _cov_s(monthly_fund_returns, mean_port, monthly_nifty_returns, mean_bench)
+            if var_bench > 0.000001:
+                risk_beta = cov_pb / var_bench
+            else:
+                risk_beta = 1.0
+
+            market_return = mean_bench * 12
+            expected_return = rf_rate + risk_beta * (market_return - rf_rate)
+            risk_alpha = (fund_return - expected_return) * 100
+
+            active_returns = [monthly_fund_returns[i] - monthly_nifty_returns[i] for i in range(n)]
+            mean_active = _mean(active_returns)
+            std_active = _std_s(active_returns, mean_active)
+            tracking_error = std_active * math.sqrt(12)
+            if tracking_error > 0.0001:
+                active_return = fund_return - market_return
+                risk_info_ratio = active_return / tracking_error
+            else:
+                risk_info_ratio = 0.0
 
     n = len(monthly_fund_returns)
-    std_dev = None  # monthly std dev (decimal), set inside if n >= 2
-    if n >= 2:
-        def _mean(arr):
-            return sum(arr) / len(arr)
-        def _var_s(arr, m):
-            return sum((x - m) ** 2 for x in arr) / (len(arr) - 1)
-        def _std_s(arr, m):
-            return math.sqrt(_var_s(arr, m))
-        def _cov_s(a, ma, b, mb):
-            return sum((a[i] - ma) * (b[i] - mb) for i in range(len(a))) / (len(a) - 1)
-
-        rf_rate = 0.065  # 6.5% annual risk-free rate
-        rf_monthly = rf_rate / 12.0
-
-        mean_port = _mean(monthly_fund_returns)
-        mean_bench = _mean(monthly_nifty_returns)
-
-        excess_port = [r - rf_monthly for r in monthly_fund_returns]
-        mean_excess = _mean(excess_port)
-        std_port = _std_s(monthly_fund_returns, mean_port)
-
-        # Sharpe Ratio — uses annualized figures for correct interpretation
-        fund_return = mean_port * 12
-        std_dev = std_port  # keep as monthly std dev for display
-        std_dev_annual_calc = std_port * math.sqrt(12)  # annualized for Sharpe
-        if std_dev_annual_calc > 0.0001:
-            risk_sharpe = (fund_return - rf_rate) / std_dev_annual_calc
-        else:
-            risk_sharpe = 0.0
-
-        # Portfolio Beta
-        var_bench = _var_s(monthly_nifty_returns, mean_bench)
-        cov_pb = _cov_s(monthly_fund_returns, mean_port, monthly_nifty_returns, mean_bench)
-        if var_bench > 0.000001:
-            risk_beta = cov_pb / var_bench
-        else:
-            risk_beta = 1.0
-
-        # Jensen's Alpha
-        market_return = mean_bench * 12
-        expected_return = rf_rate + risk_beta * (market_return - rf_rate)
-        risk_alpha = (fund_return - expected_return) * 100
-
-        # Information Ratio
-        active_returns = [monthly_fund_returns[i] - monthly_nifty_returns[i] for i in range(n)]
-        mean_active = _mean(active_returns)
-        std_active = _std_s(active_returns, mean_active)
-        tracking_error = std_active * math.sqrt(12)
-        if tracking_error > 0.0001:
-            active_return = fund_return - market_return
-            risk_info_ratio = active_return / tracking_error
-        else:
-            risk_info_ratio = 0.0
-
     # Build risk_std_dev (monthly, decimal) and monthly_returns_labeled for metadata table
-    risk_std_dev_overall = std_dev if n >= 2 else None  # monthly std dev (decimal) for summary sheets
+    risk_std_dev_overall = std_dev if n >= 2 else None
     risk_monthly_labeled = list(zip(monthly_fund_return_labels, [r for r in monthly_fund_returns])) if monthly_fund_returns else None
 
     # Styling for Diagnostics Risk Matrix header

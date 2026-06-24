@@ -4,7 +4,7 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -207,6 +207,7 @@ async def get_monthly_tracker(
             to_date=to_date,
             bench_isin=bench_isin,
             bench_name=bench_name,
+            uploaded_file_path=None,
         )
         
         return FileResponse(
@@ -215,4 +216,92 @@ async def get_monthly_tracker(
             filename=f"{fund_name.replace(' ', '_')}_Monthly_Tracker.xlsx",
         )
     except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate Excel tracker: {str(e)}")
+
+
+@router.post("/monthly-tracker")
+async def post_monthly_tracker(
+    isin: str = Query(..., description="ISIN of the fund"),
+    fund_name: str = Query(..., description="Name of the fund"),
+    from_date: str = Query("2025-12", description="Start date (YYYY-MM)"),
+    to_date: str = Query("2026-04", description="End date (YYYY-MM)"),
+    bench_isin: str = Query("", description="ISIN of the benchmark fund (optional)"),
+    bench_name: str = Query("", description="Name of the benchmark fund (optional)"),
+    file: UploadFile = File(None),
+):
+    """
+    Generate and download the Monthly Tracker Excel sheet populated with data
+    for the chosen fund, using the uploaded portfolio file if provided.
+    """
+    settings = get_settings()
+    current_dir = Path(__file__).resolve().parent
+    base_dir = Path(__file__).resolve().parents[4]
+    
+    # Locate template path
+    possible_paths = [
+        current_dir.parent.parent / "templates" / "Monthly Tracker - Flexi cap.xlsx",
+        base_dir / "FUNDS PERFORMANCE ANALYSIS" / "Monthly Tracker - Flexi cap.xlsx",
+        base_dir / "Monthly Tracker - Flexi cap.xlsx",
+    ]
+    template_path = None
+    for p in possible_paths:
+        if p.exists():
+            template_path = str(p)
+            break
+            
+    if template_path is None:
+        raise HTTPException(status_code=404, detail=f"Template Monthly Tracker Excel file not found. Searched in: {[str(p) for p in possible_paths]}")
+
+    reports_dir = Path(settings.REPORTS_DIR)
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    
+    job_id = f"tracker_{isin}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+    output_filename = f"{job_id}.xlsx"
+    output_path = str(reports_dir / output_filename)
+    
+    # Save the uploaded file if provided
+    uploaded_file_path = None
+    if file:
+        file_ext = Path(file.filename).suffix if file.filename else ".xlsx"
+        uploaded_file_path = str(reports_dir / f"uploaded_{job_id}{file_ext}")
+        try:
+            with open(uploaded_file_path, "wb") as buffer:
+                content = await file.read()
+                buffer.write(content)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to save uploaded file: {str(e)}")
+
+    try:
+        from app.utils.tracker_excel import generate_monthly_tracker_excel
+        generate_monthly_tracker_excel(
+            isin=isin,
+            fund_name=fund_name,
+            template_path=template_path,
+            output_path=output_path,
+            from_date=from_date,
+            to_date=to_date,
+            bench_isin=bench_isin,
+            bench_name=bench_name,
+            uploaded_file_path=uploaded_file_path,
+        )
+        
+        # Clean up the uploaded file if we saved it
+        if uploaded_file_path and os.path.exists(uploaded_file_path):
+            try:
+                os.remove(uploaded_file_path)
+            except Exception as e:
+                print(f"Failed to delete temp file {uploaded_file_path}: {e}")
+                
+        return FileResponse(
+            path=output_path,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            filename=f"{fund_name.replace(' ', '_')}_Monthly_Tracker.xlsx",
+        )
+    except Exception as e:
+        # Clean up the uploaded file on error
+        if uploaded_file_path and os.path.exists(uploaded_file_path):
+            try:
+                os.remove(uploaded_file_path)
+            except Exception:
+                pass
         raise HTTPException(status_code=500, detail=f"Failed to generate Excel tracker: {str(e)}")
