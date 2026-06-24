@@ -351,6 +351,11 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
     while (cy < end_year) or (cy == end_year and cm <= end_month):
         months_list.append((cy, cm))
         cm += 1
+        if cm > 12:
+            cm = 1
+            cy += 1
+        if len(months_list) > 24:
+            break
 
     # ── Prefetch real NAV data from AMFI API ─────────────────────────────────
     _nav_fund_rets_cache = {}   # { (year, month): [SI, FYTD, 6M, 3M, 1M] }
@@ -413,9 +418,7 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
         except Exception as e:
             print(f"[tracker_excel] NAV fetch failed: {e}, falling back to seed-based data")
             _use_real_nav = False
-        if cm > 12:
-            cm = 1
-            cy += 1
+
 
     is_hdfc = "hdfc flexi" in fund_name.lower() or isin.strip().upper() in ["INF179K011R0", "INF179K01608"]
 

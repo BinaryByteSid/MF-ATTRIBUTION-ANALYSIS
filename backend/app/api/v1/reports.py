@@ -4,9 +4,10 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, BackgroundTasks
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
+import asyncio
 
 from app.config import get_settings
 from app.crud.portfolio import portfolio as crud_portfolio
@@ -160,6 +161,7 @@ async def get_risk_metrics(
 
 @router.get("/monthly-tracker")
 async def get_monthly_tracker(
+    background_tasks: BackgroundTasks,
     isin: str = Query(..., description="ISIN of the fund"),
     fund_name: str = Query(..., description="Name of the fund"),
     from_date: str = Query("2025-12", description="Start date (YYYY-MM)"),
@@ -196,31 +198,48 @@ async def get_monthly_tracker(
     output_filename = f"{job_id}.xlsx"
     output_path = str(reports_dir / output_filename)
 
+    def remove_file(path: str):
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+        except Exception as e:
+            print(f"Error removing temp file {path}: {e}")
+
     try:
         from app.utils.tracker_excel import generate_monthly_tracker_excel
-        generate_monthly_tracker_excel(
-            isin=isin,
-            fund_name=fund_name,
-            template_path=template_path,
-            output_path=output_path,
-            from_date=from_date,
-            to_date=to_date,
-            bench_isin=bench_isin,
-            bench_name=bench_name,
-            uploaded_file_path=None,
+        await asyncio.wait_for(
+            asyncio.to_thread(
+                generate_monthly_tracker_excel,
+                isin=isin,
+                fund_name=fund_name,
+                template_path=template_path,
+                output_path=output_path,
+                from_date=from_date,
+                to_date=to_date,
+                bench_isin=bench_isin,
+                bench_name=bench_name,
+                uploaded_file_path=None,
+            ),
+            timeout=120.0
         )
         
+        background_tasks.add_task(remove_file, output_path)
         return FileResponse(
             path=output_path,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             filename=f"{fund_name.replace(' ', '_')}_Monthly_Tracker.xlsx",
         )
+    except asyncio.TimeoutError:
+        background_tasks.add_task(remove_file, output_path)
+        raise HTTPException(status_code=504, detail="Excel generation timed out after 120 seconds")
     except Exception as e:
+        background_tasks.add_task(remove_file, output_path)
         raise HTTPException(status_code=500, detail=f"Failed to generate Excel tracker: {str(e)}")
 
 
 @router.post("/monthly-tracker")
 async def post_monthly_tracker(
+    background_tasks: BackgroundTasks,
     isin: str = Query(..., description="ISIN of the fund"),
     fund_name: str = Query(..., description="Name of the fund"),
     from_date: str = Query("2025-12", description="Start date (YYYY-MM)"),
@@ -271,37 +290,46 @@ async def post_monthly_tracker(
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to save uploaded file: {str(e)}")
 
+    def remove_file(path: str, uploaded_path: str = None):
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+        except Exception as e:
+            print(f"Error removing output file {path}: {e}")
+        if uploaded_path:
+            try:
+                if os.path.exists(uploaded_path):
+                    os.remove(uploaded_path)
+            except Exception as e:
+                print(f"Error removing uploaded file {uploaded_path}: {e}")
+
     try:
         from app.utils.tracker_excel import generate_monthly_tracker_excel
-        generate_monthly_tracker_excel(
-            isin=isin,
-            fund_name=fund_name,
-            template_path=template_path,
-            output_path=output_path,
-            from_date=from_date,
-            to_date=to_date,
-            bench_isin=bench_isin,
-            bench_name=bench_name,
-            uploaded_file_path=uploaded_file_path,
+        await asyncio.wait_for(
+            asyncio.to_thread(
+                generate_monthly_tracker_excel,
+                isin=isin,
+                fund_name=fund_name,
+                template_path=template_path,
+                output_path=output_path,
+                from_date=from_date,
+                to_date=to_date,
+                bench_isin=bench_isin,
+                bench_name=bench_name,
+                uploaded_file_path=uploaded_file_path,
+            ),
+            timeout=120.0
         )
         
-        # Clean up the uploaded file if we saved it
-        if uploaded_file_path and os.path.exists(uploaded_file_path):
-            try:
-                os.remove(uploaded_file_path)
-            except Exception as e:
-                print(f"Failed to delete temp file {uploaded_file_path}: {e}")
-                
+        background_tasks.add_task(remove_file, output_path, uploaded_file_path)
         return FileResponse(
             path=output_path,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             filename=f"{fund_name.replace(' ', '_')}_Monthly_Tracker.xlsx",
         )
+    except asyncio.TimeoutError:
+        background_tasks.add_task(remove_file, output_path, uploaded_file_path)
+        raise HTTPException(status_code=504, detail="Excel generation timed out after 120 seconds")
     except Exception as e:
-        # Clean up the uploaded file on error
-        if uploaded_file_path and os.path.exists(uploaded_file_path):
-            try:
-                os.remove(uploaded_file_path)
-            except Exception:
-                pass
+        background_tasks.add_task(remove_file, output_path, uploaded_file_path)
         raise HTTPException(status_code=500, detail=f"Failed to generate Excel tracker: {str(e)}")

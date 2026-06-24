@@ -2057,31 +2057,82 @@ export const AttributionDashboard: React.FC = () => {
       }
 
       let response;
-      try {
-        const formData = new FormData();
-        if (uploadedFile) {
-          formData.append('file', uploadedFile);
-        }
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 120000); // 120 seconds timeout
 
-        response = await fetch(url, {
-          method: 'POST',
-          body: formData,
-          headers: headers,
-        });
-      } catch (postError) {
-        console.warn("POST monthly-tracker failed, falling back to GET:", postError);
+      try {
+        if (uploadedFile) {
+          const formData = new FormData();
+          formData.append('file', uploadedFile);
+          response = await fetch(url, {
+            method: 'POST',
+            body: formData,
+            headers: headers,
+            signal: controller.signal,
+          });
+        } else {
+          response = await fetch(url, {
+            method: 'GET',
+            headers: headers,
+            signal: controller.signal,
+          });
+        }
+      } catch (fetchError: any) {
+        if (fetchError.name === 'AbortError') {
+          throw new Error("Request timed out after 120 seconds. Please try again with a shorter date range.");
+        }
+        console.warn("Primary fetch method failed, trying fallback...", fetchError);
+      } finally {
+        clearTimeout(timeoutId);
       }
 
+      // Fallback in case of method mismatch (e.g. if the backend doesn't support the requested method)
       if (!response || response.status === 405 || response.status === 404) {
-        response = await fetch(url, {
-          method: 'GET',
-          headers: headers,
-        });
+        const fallbackController = new AbortController();
+        const fallbackTimeoutId = setTimeout(() => fallbackController.abort(), 120000);
+        try {
+          const method = uploadedFile ? 'POST' : 'GET';
+          // Try the opposite method as fallback
+          const fallbackMethod = method === 'POST' ? 'GET' : 'POST';
+          const fetchOptions: RequestInit = {
+            method: fallbackMethod,
+            headers: headers,
+            signal: fallbackController.signal,
+          };
+          if (fallbackMethod === 'POST') {
+            const formData = new FormData();
+            if (uploadedFile) {
+              formData.append('file', uploadedFile);
+            }
+            fetchOptions.body = formData;
+          }
+          response = await fetch(url, fetchOptions);
+        } catch (fallbackError: any) {
+          if (fallbackError.name === 'AbortError') {
+            throw new Error("Request timed out after 120 seconds on fallback attempt.");
+          }
+          throw fallbackError;
+        } finally {
+          clearTimeout(fallbackTimeoutId);
+        }
       }
       
       if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Server error: ${response.status} - ${errorText}`);
+        let errorMsg = `Server returned status ${response.status}`;
+        try {
+          const errorJson = await response.json();
+          if (errorJson && errorJson.detail) {
+            errorMsg = errorJson.detail;
+          }
+        } catch (e) {
+          try {
+            const errorText = await response.text();
+            if (errorText) {
+              errorMsg = errorText;
+            }
+          } catch (e2) {}
+        }
+        throw new Error(errorMsg);
       }
       
       setReportProgress(80);
