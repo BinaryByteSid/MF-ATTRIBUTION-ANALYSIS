@@ -18,7 +18,7 @@ settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Starting up — initialising database …")
+    logger.info("Starting up — initialising database (trigger redeploy) …")
     try:
         await init_db()
         logger.info("Database ready.")
