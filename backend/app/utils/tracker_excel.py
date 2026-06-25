@@ -366,6 +366,11 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
 
     # 3. Load original Monthly Tracker workbook
     wb = openpyxl.load_workbook(template_path, data_only=False)
+    
+    # Create clean reference copy for Cumulative Summary before modifications
+    ref_name = "Jan'26" if "Jan'26" in wb.sheetnames else wb.sheetnames[0]
+    sheet_cum = wb.copy_worksheet(wb[ref_name])
+    sheet_cum.title = "Cumulative Summary"
 
     # 4. Parse from_date and to_date range
     start_parts = from_date.split('-')
@@ -1675,6 +1680,37 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
                 ws[f"D{r_num}"] = f"=B{r_num}-C{r_num}"
                 ws[f"F{r_num}"] = f"=B{r_num}-E{r_num}"
                 
+            # Write fresh formulas for shifted stocks and sectoral calls on monthly sheets
+            for idx_s in range(10):
+                r = 46 + formula_offset + idx_s
+                if ws[f"A{r}"].value:
+                    ws[f"D{r}"] = f"=ABS(N(B{r})-N(C{r}))"
+                    
+            for idx_s in range(3):
+                r = 61 + formula_offset + idx_s
+                if ws[f"A{r}"].value:
+                    ws[f"C{r}"] = f"=VLOOKUP(A{r},[1]Highlights!$A$10:$E$20,5,0)"
+                    ws[f"D{r}"] = f"=B{r}-C{r}"
+                if ws[f"H{r}"].value:
+                    ws[f"J{r}"] = f"=VLOOKUP(H{r},[1]Highlights!$A$10:$E$20,5,0)"
+                    ws[f"K{r}"] = f"=I{r}-J{r}"
+                    
+            for idx_s in range(10):
+                r = 67 + formula_offset + idx_s
+                if ws[f"A{r}"].value:
+                    ws[f"C{r}"] = f"=VLOOKUP(A{r},[1]Attribution!$B$11:$G$1048576,6,0)"
+                    ws[f"D{r}"] = f"=N(B{r})-N(C{r})"
+                if ws[f"H{r}"].value:
+                    ws[f"J{r}"] = f"=VLOOKUP(H{r},[1]Attribution!$B$11:$G$1048576,6,0)"
+                    ws[f"K{r}"] = f"=N(I{r})-N(J{r})"
+                    
+            r81 = 81 + formula_offset
+            ws[f"A{r81}"] = "=D3"
+            ws[f"C{r81}"] = f"=B{r81}/A{r81}"
+            
+            r84 = 84 + formula_offset
+            ws[f"C{r84}"] = f"=B{r84}/A{r84}"
+                
             # Clear the old risk matrix region (was at rows 101-106 in template, now shifted)
             old_risk_start = 101 + formula_offset
             for r in range(old_risk_start, old_risk_start + 6):
@@ -1688,7 +1724,7 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
 
     # Delete unused sheets
     for sheet_name in list(wb.sheetnames):
-        if sheet_name != "Attribution Report" and sheet_name not in generated_sheets:
+        if sheet_name not in ["Attribution Report", "Cumulative Summary"] and sheet_name not in generated_sheets:
             wb.remove(wb[sheet_name])
 
     # ── 4. Create Attribution Report Sheet ────────────────────────────────────
@@ -1785,7 +1821,8 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
         return total_row + 2
 
     # Draw Tables
-    current_row = 21
+    extra_rows_attr = 15 + (len(risk_monthly_labeled) if risk_monthly_labeled else 0)
+    current_row = 5 + extra_rows_attr + 2
     latest_month_name = generated_sheets[-1]
     
     # Table 1: Latest Month
@@ -1826,14 +1863,12 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
         sheet_attr.column_dimensions[col_letter].width = max(max_len + 3, 14)
 
     # ── 5. Create "Cumulative Summary" Sheet (mirrors monthly sheet format) ────
-    for old_name in ["Active Weight Summary", "Cumulative Analysis", "Cumulative Summary"]:
+    for old_name in ["Active Weight Summary", "Cumulative Analysis"]:
         if old_name in wb.sheetnames:
             wb.remove(wb[old_name])
 
-    # Clone from a monthly sheet as base template
-    ref_sheet_name = generated_sheets[0] if generated_sheets else wb.sheetnames[0]
-    sheet_cum: any = wb.copy_worksheet(wb[ref_sheet_name])
-    sheet_cum.title = "Cumulative Summary"
+    # sheet_cum was already copied from template at the beginning of the function
+    sheet_cum = wb["Cumulative Summary"]
 
     # ── Compute averages from accumulators ────────────────────────────────────────
     n_months = len(months_list)
@@ -1855,35 +1890,13 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
     sheet_cum["A1"] = "Cumulative Summary"
     sheet_cum["B1"] = f"Period: {period_label} ({n_months} months avg)"
 
-    # Populate vertical metadata table in sheet_cum with averages
-    populate_vertical_metadata_table(
-        ws=sheet_cum,
-        fund_name=fund_name,
-        isin=isin,
-        aum_label=f"{n_months}m avg",
-        aum=round(_avg(cum_aum), 2),
-        exr=exr,
-        manager=manager,
-        bench_name=bench_name,
-        bench_isin=bench_isin,
-        bench_aum=round(_avg(cum_bench_aum), 2) if (bench_name and cum_bench_aum) else None,
-        bench_exr=bench_exr if bench_name else None,
-        bench_manager=bench_manager if bench_manager else "Benchmark Mgr.",
-        risk_sharpe=risk_sharpe,
-        risk_info_ratio=risk_info_ratio,
-        risk_beta=risk_beta,
-        risk_alpha=risk_alpha,
-        std_dev_annual=risk_std_dev_overall,
-        monthly_returns_labeled=risk_monthly_labeled
-    )
-
-    # ── Rows 21-25: Fund's Performance (averages across months) ─────────────────
+    # ── Rows 7-11: Fund's Performance (averages across months) ──────────────────
     avg_fund = [_avg_list(cum_fund_rets, i) for i in range(5)]
     avg_nifty = [_avg_list(cum_nifty_rets, i) for i in range(5)]
     avg_bench = [_avg_list(cum_bench_rets, i) for i in range(5)]
     avg_cat = [_avg_list(cum_cat_rets, i) for i in range(5)]
 
-    for idx_r, row_num in enumerate([21, 22, 23, 24, 25]):
+    for idx_r, row_num in enumerate([7, 8, 9, 10, 11]):
         sheet_cum[f"B{row_num}"] = round(avg_fund[idx_r], 4)
         sheet_cum[f"C{row_num}"] = round(avg_nifty[idx_r], 4)
         sheet_cum[f"E{row_num}"] = round(avg_bench[idx_r], 4)
@@ -1891,41 +1904,41 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
         sheet_cum[f"H{row_num}"] = "-"  # Rank not meaningful for averages
         sheet_cum[f"I{row_num}"] = "-"
 
-    # ── Rows 29-36: Portfolio Details (averages) ─────────────────────────────────
-    sheet_cum["B29"] = round(_avg(cum_large_cap), 2)
-    sheet_cum["B30"] = round(_avg(cum_mid_cap), 2)
-    sheet_cum["B31"] = round(_avg(cum_small_cap), 2)
-    sheet_cum["B32"] = round(_avg(cum_others_cap), 2)
-    sheet_cum["B33"] = round(_avg(cum_cash), 2)
-    sheet_cum["B36"] = round(_avg(cum_num_stocks))
+    # ── Rows 15-22: Portfolio Details (averages) ─────────────────────────────────
+    sheet_cum["B15"] = round(_avg(cum_large_cap), 2)
+    sheet_cum["B16"] = round(_avg(cum_mid_cap), 2)
+    sheet_cum["B17"] = round(_avg(cum_small_cap), 2)
+    sheet_cum["B18"] = round(_avg(cum_others_cap), 2)
+    sheet_cum["B19"] = round(_avg(cum_cash), 2)
+    sheet_cum["B22"] = round(_avg(cum_num_stocks))
 
-    # ── Rows 39-41: Entry/Exit stocks ───────────────────────────────────────────
+    # ── Rows 27: Entry/Exit stocks ──────────────────────────────────────────────
     if all_period_entries:
         largest_entry = max(all_period_entries, key=lambda x: x[1])
-        sheet_cum["A41"] = largest_entry[0]
-        sheet_cum["B41"] = largest_entry[1]
-        sheet_cum["C41"] = largest_entry[2]
+        sheet_cum["A27"] = largest_entry[0]
+        sheet_cum["B27"] = largest_entry[1]
+        sheet_cum["C27"] = largest_entry[2]
     else:
-        sheet_cum["A41"] = "-"
-        sheet_cum["B41"] = "-"
-        sheet_cum["C41"] = "-"
+        sheet_cum["A27"] = "-"
+        sheet_cum["B27"] = "-"
+        sheet_cum["C27"] = "-"
         
     if all_period_exits:
         largest_exit = max(all_period_exits, key=lambda x: x[1])
-        sheet_cum["E41"] = largest_exit[0]
-        sheet_cum["F41"] = largest_exit[1]
-        sheet_cum["G41"] = largest_exit[2]
+        sheet_cum["E27"] = largest_exit[0]
+        sheet_cum["F27"] = largest_exit[1]
+        sheet_cum["G27"] = largest_exit[2]
     else:
-        sheet_cum["E41"] = "-"
-        sheet_cum["F41"] = "-"
-        sheet_cum["G41"] = "-"
+        sheet_cum["E27"] = "-"
+        sheet_cum["F27"] = "-"
+        sheet_cum["G27"] = "-"
 
-    # ── Rows 48-56: NAV, flows (averages) ────────────────────────────────────────
-    sheet_cum["B48"] = round(_avg(cum_target_nav), 5) if cum_target_nav else "-"
-    sheet_cum["B49"] = round(_avg(cum_nifty_target_nav), 5) if cum_nifty_target_nav else "-"
-    sheet_cum["B56"] = round(_avg(cum_flows), 2)
+    # ── Rows 34-42: NAV, flows (averages) ────────────────────────────────────────
+    sheet_cum["B34"] = round(_avg(cum_target_nav), 5) if cum_target_nav else "-"
+    sheet_cum["B35"] = round(_avg(cum_nifty_target_nav), 5) if cum_nifty_target_nav else "-"
+    sheet_cum["B42"] = round(_avg(cum_flows), 2)
 
-    # ── Rows 60-69: Top 10 Stocks by Active Weight (cumulative averages) ─────────
+    # ── Rows 46-55: Top 10 Stocks by Active Weight (cumulative averages) ─────────
     avg_stocks_all = []
     for sname, sacc in stock_summary_acc.items():
         if not sacc["p_wts"]:
@@ -1938,7 +1951,7 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
     top10_active = avg_stocks_all_sorted[:10]
 
     for idx_s in range(10):
-        row_num = 60 + idx_s
+        row_num = 46 + idx_s
         if idx_s < len(top10_active):
             sn, ap, ab, ad = top10_active[idx_s]
             sheet_cum[f"A{row_num}"] = sn
@@ -1951,7 +1964,7 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
             sheet_cum[f"C{row_num}"] = None
             sheet_cum[f"D{row_num}"] = None
 
-    # ── Rows 75-77: Sectoral Calls – Contributing and Detracting (cumulative avg) ──
+    # ── Rows 61-63: Sectoral Calls – Contributing and Detracting (cumulative avg) ──
     cum_sector_calls = []
     for sec in all_standard_sectors:
         avg_w = _avg(sector_weight_acc.get(sec, []))
@@ -1969,7 +1982,7 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
         cum_detract_sectors = sorted(cum_sector_calls, key=lambda x: x[4])[:3]
 
     for idx_s in range(3):
-        row_num = 75 + idx_s
+        row_num = 61 + idx_s
         if idx_s < len(cum_contrib_sectors):
             sec, p_w, b_w, diff, contrib = cum_contrib_sectors[idx_s]
             sheet_cum[f"A{row_num}"] = sec
@@ -1992,7 +2005,7 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
             for col_l in ["H", "I", "J", "K", "L"]:
                 sheet_cum[f"{col_l}{row_num}"] = None
 
-    # ── Rows 81-90: Top 10 Contributing / Detracting Stocks (cumulative avg) ─────
+    # ── Rows 67-76: Top 10 Contributing / Detracting Stocks (cumulative avg) ─────
     avg_stk_contrib = []
     for stk_name, contribs in stock_contrib_acc.items():
         if not contribs:
@@ -2009,7 +2022,7 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
     bot10_stk = sorted([s for s in avg_stk_contrib_sorted if s[3] < 0], key=lambda x: x[3])[:10]
 
     for idx_s in range(10):
-        row_num = 81 + idx_s
+        row_num = 67 + idx_s
         if idx_s < len(top10_stk):
             sn, pw, bw, contrib = top10_stk[idx_s]
             sheet_cum[f"A{row_num}"] = sn
@@ -2034,10 +2047,73 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
             for col_l in ["H", "I", "J", "K", "L", "M"]:
                 sheet_cum[f"{col_l}{row_num}"] = None
 
-    # ── Rows 95-98: AR Ownership (averages) ──────────────────────────────────────
-    sheet_cum["B95"] = round(_avg(cum_ar_aum_scheme), 2) if cum_ar_aum_scheme else "-"
-    sheet_cum["B98"] = round(_avg(cum_ar_aum_amc), 2) if cum_ar_aum_amc else "-"
-    sheet_cum["A98"] = round(_avg(cum_amc_aum), 2) if cum_amc_aum else "-"
+    # ── Rows 81-84: AR Ownership (averages) ──────────────────────────────────────
+    sheet_cum["B81"] = round(_avg(cum_ar_aum_scheme), 2) if cum_ar_aum_scheme else "-"
+    sheet_cum["B84"] = round(_avg(cum_ar_aum_amc), 2) if cum_ar_aum_amc else "-"
+    sheet_cum["A84"] = round(_avg(cum_amc_aum), 2) if cum_amc_aum else "-"
+
+    # ── Shift rows and write metadata on Cumulative Summary sheet ───────────────
+    extra_rows = 15 + (len(risk_monthly_labeled) if risk_monthly_labeled else 0)
+    sheet_cum.insert_rows(5, extra_rows)
+
+    # Populate vertical metadata table in sheet_cum with averages
+    populate_vertical_metadata_table(
+        ws=sheet_cum,
+        fund_name=fund_name,
+        isin=isin,
+        aum_label=f"{n_months}m avg",
+        aum=round(_avg(cum_aum), 2),
+        exr=exr,
+        manager=manager,
+        bench_name=bench_name,
+        bench_isin=bench_isin,
+        bench_aum=round(_avg(cum_bench_aum), 2) if (bench_name and cum_bench_aum) else None,
+        bench_exr=bench_exr if bench_name else None,
+        bench_manager=bench_manager if bench_manager else "Benchmark Mgr.",
+        risk_sharpe=risk_sharpe,
+        risk_info_ratio=risk_info_ratio,
+        risk_beta=risk_beta,
+        risk_alpha=risk_alpha,
+        std_dev_annual=risk_std_dev_overall,
+        monthly_returns_labeled=risk_monthly_labeled
+    )
+
+    # Re-write fresh formulas at correctly shifted rows for returns
+    for r_num_orig in [7, 8, 9, 10, 11]:
+        r_num = r_num_orig + extra_rows
+        sheet_cum[f"D{r_num}"] = f"=B{r_num}-C{r_num}"
+        sheet_cum[f"F{r_num}"] = f"=B{r_num}-E{r_num}"
+
+    # Write fresh formulas for shifted stocks and sectoral calls on Cumulative Summary
+    for idx_s in range(10):
+        r = 46 + extra_rows + idx_s
+        if sheet_cum[f"A{r}"].value:
+            sheet_cum[f"D{r}"] = f"=ABS(N(B{r})-N(C{r}))"
+            
+    for idx_s in range(3):
+        r = 61 + extra_rows + idx_s
+        if sheet_cum[f"A{r}"].value:
+            sheet_cum[f"C{r}"] = f"=VLOOKUP(A{r},[1]Highlights!$A$10:$E$20,5,0)"
+            sheet_cum[f"D{r}"] = f"=B{r}-C{r}"
+        if sheet_cum[f"H{r}"].value:
+            sheet_cum[f"J{r}"] = f"=VLOOKUP(H{r},[1]Highlights!$A$10:$E$20,5,0)"
+            sheet_cum[f"K{r}"] = f"=I{r}-J{r}"
+            
+    for idx_s in range(10):
+        r = 67 + extra_rows + idx_s
+        if sheet_cum[f"A{r}"].value:
+            sheet_cum[f"C{r}"] = f"=VLOOKUP(A{r},[1]Attribution!$B$11:$G$1048576,6,0)"
+            sheet_cum[f"D{r}"] = f"=N(B{r})-N(C{r})"
+        if sheet_cum[f"H{r}"].value:
+            sheet_cum[f"J{r}"] = f"=VLOOKUP(H{r},[1]Attribution!$B$11:$G$1048576,6,0)"
+            sheet_cum[f"K{r}"] = f"=N(I{r})-N(J{r})"
+            
+    r81 = 81 + extra_rows
+    sheet_cum[f"A{r81}"] = "=D3"
+    sheet_cum[f"C{r81}"] = f"=B{r81}/A{r81}"
+    
+    r84 = 84 + extra_rows
+    sheet_cum[f"C{r84}"] = f"=B{r84}/A{r84}"
 
     # Reorder sheets: generated sheets → Cumulative Summary → Attribution Report
     ordered_sheets = []

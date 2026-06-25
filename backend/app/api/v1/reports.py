@@ -159,6 +159,120 @@ async def get_risk_metrics(
         raise HTTPException(status_code=500, detail=f"Failed to compute risk metrics: {str(e)}")
 
 
+@router.get("/monthly-nav")
+async def get_monthly_nav(
+    fund_name: str = Query(..., description="Name of the fund (e.g. 'Parag Parikh Flexi Cap Fund')"),
+    isin: str = Query("", description="ISIN of the fund (optional, improves search accuracy)"),
+    from_date: str = Query("2025-12", description="Start month YYYY-MM (filter applied AFTER return calc)"),
+    to_date: str = Query("2026-04", description="End month YYYY-MM"),
+):
+    """
+    Return the month-end NAV table with monthly returns for a fund.
+
+    Uses the exact pandas pct_change() methodology:
+      1. Sort NAV history by date ascending
+      2. Group by Year-Month, pick the LAST trading day NAV of each month
+      3. Compute pct_change() on the FULL history (before date filtering)
+      4. Apply the from_date / to_date filter on the result
+
+    Monthly Return = (Last NAV of month - Last NAV of prev month) / Last NAV of prev month * 100
+
+    Returns:
+        fund_name: str
+        isin_used: str
+        data: list of {
+            month:          "YYYY-MM"
+            month_end_date: "YYYY-MM-DD"   (last trading day of that month)
+            month_end_nav:  float          (NAV on that day)
+            monthly_return: float | null   (% return vs prior month-end; null for first row)
+        }
+        total_months: int
+        calculation_note: str
+    """
+    try:
+        import pandas as pd
+        from app.utils.nav_fetcher import _get_nav_history_for_fund, search_scheme_code
+
+        # Fetch full NAV history (no date filter yet)
+        nav_history = await asyncio.to_thread(
+            _get_nav_history_for_fund, isin, fund_name
+        )
+
+        if not nav_history:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No NAV data found for fund '{fund_name}' (ISIN={isin or 'not provided'}). "
+                       "Try a more specific fund name or provide an ISIN."
+            )
+
+        # ── Step 1 & 2: Build DataFrame, sort, group by month-period ──────────
+        df = pd.DataFrame(nav_history, columns=["Date", "NAV"])
+        df["Date"] = pd.to_datetime(df["Date"])
+        df = df.sort_values("Date")  # ascending
+
+        monthly = (
+            df.groupby(df["Date"].dt.to_period("M"))
+              .agg(
+                  month_end_nav=("NAV", "last"),
+                  month_end_date=("Date", "last"),
+              )
+        )
+
+        # ── Step 3: pct_change on FULL history (before filtering) ─────────────
+        monthly["monthly_return_pct"] = monthly["month_end_nav"].pct_change() * 100
+
+        # ── Step 4: Apply date filter ─────────────────────────────────────────
+        try:
+            filtered = monthly.loc[from_date:to_date]
+        except Exception:
+            filtered = monthly
+
+        if filtered.empty:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No NAV data in the requested range {from_date} to {to_date}."
+            )
+
+        # ── Build response ────────────────────────────────────────────────────
+        rows = []
+        for period, row in filtered.iterrows():
+            ret = row["monthly_return_pct"]
+            rows.append({
+                "month": str(period),
+                "month_end_date": str(row["month_end_date"].date()),
+                "month_end_nav": round(float(row["month_end_nav"]), 4),
+                "monthly_return": round(float(ret), 4) if not pd.isna(ret) else None,
+            })
+
+        # Find which AMFI scheme code was resolved
+        from app.utils.nav_fetcher import _isin_to_code, _name_to_code
+        isin_used = isin.upper().strip() if isin else ""
+        scheme_code = _isin_to_code.get(isin_used) or _name_to_code.get(fund_name.lower())
+
+        return {
+            "fund_name": fund_name,
+            "isin_used": isin_used or "(name-based search)",
+            "scheme_code": scheme_code,
+            "from_date": from_date,
+            "to_date": to_date,
+            "total_months_in_range": len(rows),
+            "total_nav_entries": len(nav_history),
+            "calculation_note": (
+                "Monthly Return = (Last NAV of month − Last NAV of prev month) / "
+                "Last NAV of prev month × 100. "
+                "pct_change() computed on FULL history before date filtering."
+            ),
+            "data": rows,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to compute monthly NAV table: {str(e)}")
+
+
+
+
 @router.get("/monthly-tracker")
 async def get_monthly_tracker(
     background_tasks: BackgroundTasks,

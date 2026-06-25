@@ -154,6 +154,7 @@ export interface RiskMetrics {
   alpha: number;
   information_ratio: number;
   var_95: number;
+  monthly_returns?: { date: string; fund_return: number; bench_return: number }[];
 }
 
 export interface StockHolding {
