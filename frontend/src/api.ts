@@ -41,14 +41,14 @@ api.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config;
-    
+
     if (error.response?.status === 401 && !originalRequest._retry) {
       if (originalRequest.url === '/auth/refresh' || originalRequest.url === '/auth/login') {
         localStorage.removeItem('access_token');
         localStorage.removeItem('refresh_token');
         return Promise.reject(error);
       }
-      
+
       if (isRefreshing) {
         return new Promise((resolve, reject) => {
           failedQueue.push({ resolve, reject });
@@ -74,27 +74,27 @@ api.interceptors.response.use(
           refresh_token: refreshToken,
         });
         const { access_token } = response.data;
-        
+
         localStorage.setItem('access_token', access_token);
         api.defaults.headers.common['Authorization'] = `Bearer ${access_token}`;
         originalRequest.headers.Authorization = `Bearer ${access_token}`;
-        
+
         processQueue(null, access_token);
         isRefreshing = false;
-        
+
         return api(originalRequest);
       } catch (refreshError) {
         processQueue(refreshError, null);
         isRefreshing = false;
-        
+
         localStorage.removeItem('access_token');
         localStorage.removeItem('refresh_token');
         window.dispatchEvent(new Event('auth-logout'));
-        
+
         return Promise.reject(refreshError);
       }
     }
-    
+
     return Promise.reject(error);
   }
 );
@@ -264,7 +264,7 @@ export const getPerformanceHistory = (portfolioId: string) => {
 
   let portfolioCum = 100;
   let benchmarkCum = 100;
-  
+
   const isP1 = portfolioId === 'p1-uuid';
   const pVolatility = isP1 ? 0.015 : 0.011;
   const bVolatility = 0.010;
@@ -273,10 +273,10 @@ export const getPerformanceHistory = (portfolioId: string) => {
 
   for (let i = 0; i < 60; i++) {
     const dateStr = new Date(baseDate.getTime() + i * 6 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-    
+
     const seedP = Math.sin(i / 3) * 0.01 + (Math.random() - 0.48) * pVolatility + pTrend;
     const seedB = Math.sin(i / 3) * 0.008 + (Math.random() - 0.49) * bVolatility + bTrend;
-    
+
     portfolioCum *= (1 + seedP);
     benchmarkCum *= (1 + seedB);
 
@@ -301,7 +301,7 @@ export const getComparativePerformance = (
 ) => {
   const dates = [];
   const baseDate = new Date();
-  
+
   let points = 12; // Default Monthly points
   let stepDays = 30;
 
@@ -326,7 +326,7 @@ export const getComparativePerformance = (
 
   for (let i = 0; i < points; i++) {
     const dateStr = new Date(baseDate.getTime() + i * stepDays * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-    
+
     // Pseudo-random returns based on selection
     const ret1 = (Math.random() - 0.45) * 0.08 + 0.005;
     const ret2 = (Math.random() - 0.48) * 0.07 + 0.003;
@@ -470,11 +470,11 @@ export const parseUploadedHoldings = (buffer: ArrayBuffer, navMap?: Map<string, 
   const workbook = XLSX.read(data, { type: 'array' });
   const firstSheetName = workbook.SheetNames[0];
   const worksheet = workbook.Sheets[firstSheetName];
-  
+
   // Convert worksheet to 2D array of cells
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const rows = XLSX.utils.sheet_to_json<any[]>(worksheet, { header: 1 });
-  
+
   // Find the header row (the one containing 'isin')
   let headerIndex = -1;
   for (let i = 0; i < rows.length; i++) {
@@ -515,15 +515,15 @@ export const parseUploadedHoldings = (buffer: ArrayBuffer, navMap?: Map<string, 
 
   if (headerIndex !== -1 && rows[headerIndex]) {
     const headers = rows[headerIndex].map(h => String(h || '').toLowerCase().trim());
-    
+
     // Improved name column selector (exclude code/id/no/num/ticker/isin)
-    const foundSpecificName = headers.findIndex(h => 
+    const foundSpecificName = headers.findIndex(h =>
       ['scheme name', 'fund name', 'scheme_name', 'fund_name', 'scheme/fund name', 'scheme / fund name'].some(k => h === k || h.includes(k))
     );
     if (foundSpecificName !== -1) {
       nameCol = foundSpecificName;
     } else {
-      const foundGeneralName = headers.findIndex(h => 
+      const foundGeneralName = headers.findIndex(h =>
         (h.includes('name') || h.includes('fund') || h.includes('scheme')) &&
         !['code', 'id', 'no', 'num', 'ticker', 'key', 'isin'].some(k => h.includes(k))
       );
@@ -531,14 +531,14 @@ export const parseUploadedHoldings = (buffer: ArrayBuffer, navMap?: Map<string, 
     }
 
     // Prioritize scheme/fund ISIN
-    const schemeIsinIdx = headers.findIndex(h => 
+    const schemeIsinIdx = headers.findIndex(h =>
       ['scheme isin', 'fund isin', 'scheme_isin', 'fund_isin', 'sd_scheme isin', 'sd_scheme_isin'].some(k => h === k || h.includes(k))
     );
     if (schemeIsinIdx !== -1) {
       isinCol = schemeIsinIdx;
     } else {
       // Find any ISIN column that doesn't contain company/stock/pd
-      const cleanIsinIdx = headers.findIndex(h => 
+      const cleanIsinIdx = headers.findIndex(h =>
         h.includes('isin') && !['company', 'stock', 'pd_', 'pd '].some(k => h.includes(k))
       );
       if (cleanIsinIdx !== -1) {
@@ -549,56 +549,56 @@ export const parseUploadedHoldings = (buffer: ArrayBuffer, navMap?: Map<string, 
       }
     }
 
-    const foundWeight = headers.findIndex(h => 
+    const foundWeight = headers.findIndex(h =>
       (h.includes('weight') || h.includes('allocation') || h.includes('wt')) &&
       !['value', 'nav', 'price'].some(k => h.includes(k))
     );
     if (foundWeight !== -1) weightCol = foundWeight;
 
-    const foundValue = headers.findIndex(h => 
+    const foundValue = headers.findIndex(h =>
       (h.includes('value') || h.includes('val') || h.includes('amount') || h.includes('current')) &&
       !['nav', 'price', 'weight', 'wt', 'allocation'].some(k => h.includes(k))
     );
     if (foundValue !== -1) valueCol = foundValue;
 
-    const foundNav = headers.findIndex(h => 
+    const foundNav = headers.findIndex(h =>
       (h.includes('nav') || h.includes('price')) &&
       !['weight', 'wt', 'allocation', 'value', 'val', 'amount'].some(k => h.includes(k))
     );
     if (foundNav !== -1) navCol = foundNav;
 
-    const foundCode = headers.findIndex(h => 
+    const foundCode = headers.findIndex(h =>
       ['code', 'id', 'no', 'num', 'ticker'].some(k => h.includes(k)) &&
       !['name', 'isin', 'nav', 'value', 'weight'].some(k => h.includes(k))
     );
     if (foundCode !== -1) codeCol = foundCode;
 
-    const foundUnits = headers.findIndex(h => 
+    const foundUnits = headers.findIndex(h =>
       ['unit', 'qty', 'quantity', 'shares'].some(k => h.includes(k)) &&
       !['price', 'nav', 'value', 'weight'].some(k => h.includes(k))
     );
     if (foundUnits !== -1) unitsCol = foundUnits;
 
-    const foundAvgNav = headers.findIndex(h => 
+    const foundAvgNav = headers.findIndex(h =>
       ['avg cost', 'avg price', 'average cost', 'average price', 'average nav', 'avg nav', 'purchase price', 'buy price', 'cost price', 'acq price', 'acquisition cost'].some(k => h === k || h.includes(k))
     );
     if (foundAvgNav !== -1) avgNavCol = foundAvgNav;
 
-    const foundInvestVal = headers.findIndex(h => 
+    const foundInvestVal = headers.findIndex(h =>
       ['invested value', 'investment value', 'cost value', 'purchase value', 'invested amount', 'investment amount', 'cost amount'].some(k => h === k || h.includes(k))
     );
     if (foundInvestVal !== -1) investValueCol = foundInvestVal;
 
     // Find stock name, sector/industry, and allocation % columns
-    stockNameCol = headers.findIndex(h => 
+    stockNameCol = headers.findIndex(h =>
       ['instrument name', 'instrument_name', 'company name', 'company_name', 'stock name', 'stock_name', 'pd_instrument name', 'pd_instrument_name'].some(k => h === k || h.includes(k))
     );
-    
-    stockSectorCol = headers.findIndex(h => 
+
+    stockSectorCol = headers.findIndex(h =>
       ['industry', 'sector', 'segment', 'asset class', 'category', 'class', 'pd_instrument industry', 'pd_instrument_industry'].some(k => h === k || h.includes(k))
     );
 
-    stockWeightCol = headers.findIndex(h => 
+    stockWeightCol = headers.findIndex(h =>
       ['holding (%)', 'holding %', 'holding_percentage', 'pd_holding (%)', 'pd_holding_%', 'pd_holding_percentage'].some(k => h === k || h.includes(k))
     );
   }
@@ -639,8 +639,8 @@ export const parseUploadedHoldings = (buffer: ArrayBuffer, navMap?: Map<string, 
     if (!scheme_name || scheme_name.toLowerCase().includes('total') || scheme_name.toLowerCase().includes('portfolio')) continue;
 
     const isin = row[isinCol] ? String(row[isinCol]).trim().toUpperCase() : `ISIN-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
-    
-    
+
+
     // Look up real current NAV and official scheme name from loaded navMap
     let current_nav = parseFloat(String(row[navCol] || ''));
     let matchedName = scheme_name;
@@ -653,7 +653,7 @@ export const parseUploadedHoldings = (buffer: ArrayBuffer, navMap?: Map<string, 
       if (!navMatch && scheme_name) {
         navMatch = navMap.get(scheme_name.toLowerCase());
       }
-      
+
       // Fuzzy/Partial scheme name matching
       if (!navMatch && scheme_name) {
         const cleanName = (name: string): string => {
@@ -747,7 +747,7 @@ export const parseUploadedHoldings = (buffer: ArrayBuffer, navMap?: Map<string, 
       const sector = stockSectorCol !== -1 && row[stockSectorCol] ? String(row[stockSectorCol]).trim() : 'Diversified Equity';
       const rawAlloc = stockWeightCol !== -1 && row[stockWeightCol] ? parseFloat(String(row[stockWeightCol])) : 0;
       const allocation = isNaN(rawAlloc) ? 0 : (rawAlloc > 1 ? rawAlloc : rawAlloc * 100);
-      
+
       if (company && allocation > 0) {
         if (!schemeStocks[matchedName]) {
           schemeStocks[matchedName] = [];

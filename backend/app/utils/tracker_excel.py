@@ -224,10 +224,10 @@ def populate_vertical_metadata_table(ws, fund_name, isin, aum_label, aum, exr, m
         val_c.border = risk_border
         
         if isinstance(val, (int, float)):
-            if "Ratio" in label or "Beta" in label or "Alpha" in label:
-                val_c.number_format = '0.00'
-            elif "Expense" in label or label == "Expense Ratio":
+            if "Expense" in label or label == "Expense Ratio":
                 val_c.number_format = '0.00%'
+            elif "Ratio" in label or "Beta" in label or "Alpha" in label:
+                val_c.number_format = '0.00'
             elif "Std Dev" in label or "Return" in label:
                 val_c.number_format = '0.00%'
             else:
@@ -236,13 +236,42 @@ def populate_vertical_metadata_table(ws, fund_name, isin, aum_label, aum, exr, m
         else:
             val_c.alignment = Alignment(horizontal="left")
 
+def _find_data_file(filename: str, template_path: str = None) -> str | None:
+    # 1. Try template_path directory
+    if template_path:
+        d = os.path.dirname(template_path)
+        path = os.path.join(d, filename)
+        if os.path.exists(path):
+            return path
+        # Try parent of template_path directory
+        path = os.path.join(os.path.dirname(d), filename)
+        if os.path.exists(path):
+            return path
+            
+    # 2. Try relative to this file (tracker_excel.py in backend/app/utils/)
+    workspace_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+    path = os.path.join(workspace_root, filename)
+    if os.path.exists(path):
+        return path
+        
+    # 3. Try templates directory inside backend/app/
+    backend_templates = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "templates"))
+    path = os.path.join(backend_templates, filename)
+    if os.path.exists(path):
+        return path
+        
+    # 4. Try current working directory
+    if os.path.exists(filename):
+        return filename
+        
+    return None
+
 def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str, output_path: str, from_date: str = "2025-12", to_date: str = "2026-04", bench_isin: str = "", bench_name: str = "", uploaded_file_path: str = None):
     # 0. Load pre-processed monthly stock prices
     df_prices = None
     try:
-        dir_name = os.path.dirname(template_path)
-        prices_csv_path = os.path.join(dir_name, "All_stocks_monthly_prices.csv")
-        if os.path.exists(prices_csv_path):
+        prices_csv_path = _find_data_file("All_stocks_monthly_prices.csv", template_path)
+        if prices_csv_path and os.path.exists(prices_csv_path):
             df_prices = pd.read_csv(prices_csv_path)
             # Add cleaned name column for case-insensitive punctuation-agnostic match
             def clean_str(s):
@@ -287,10 +316,8 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
     row_values = []
 
     try:
-        dir_name = os.path.dirname(template_path)
-        meta_excel_path = os.path.join(dir_name, "Expense ratio & fund manager.xlsx")
-        
-        if os.path.exists(meta_excel_path):
+        meta_excel_path = _find_data_file("Expense ratio & fund manager.xlsx", template_path)
+        if meta_excel_path and os.path.exists(meta_excel_path):
             df_meta = pd.read_excel(meta_excel_path, sheet_name=0, header=3)
             match_row = None
             for idx, row in df_meta.iterrows():
@@ -314,9 +341,8 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
 
     if bench_isin or bench_name:
         try:
-            dir_name = os.path.dirname(template_path)
-            meta_excel_path = os.path.join(dir_name, "Expense ratio & fund manager.xlsx")
-            if os.path.exists(meta_excel_path):
+            meta_excel_path = _find_data_file("Expense ratio & fund manager.xlsx", template_path)
+            if meta_excel_path and os.path.exists(meta_excel_path):
                 df_bench_meta = pd.read_excel(meta_excel_path, sheet_name=0, header=3)
                 bench_match_row = None
                 for idx, row in df_bench_meta.iterrows():
@@ -442,8 +468,9 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
             port_excel_path = uploaded_file_path
             print(f"[tracker_excel] Reading uploaded portfolio file: {port_excel_path}")
         else:
-            dir_name = os.path.dirname(template_path)
-            port_excel_path = os.path.join(os.path.dirname(dir_name), "portfolio last 6 months.xlsx")
+            port_excel_path = _find_data_file("portfolio last 6 months.xlsx", template_path)
+            if not port_excel_path:
+                port_excel_path = "portfolio last 6 months.xlsx"
             print(f"[tracker_excel] Reading default portfolio file: {port_excel_path}")
 
         if os.path.exists(port_excel_path):
@@ -502,9 +529,8 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
     # Load Nifty CSV
     df_nifty = None
     try:
-        dir_name = os.path.dirname(template_path)
-        nifty_csv_path = os.path.join(dir_name, "NIFTY50_2025-06-01_to_2026-06-01.csv")
-        if os.path.exists(nifty_csv_path):
+        nifty_csv_path = _find_data_file("NIFTY50_2025-06-01_to_2026-06-01.csv", template_path)
+        if nifty_csv_path and os.path.exists(nifty_csv_path):
             df_nifty = pd.read_csv(nifty_csv_path)
             # errors='coerce' turns unparseable values into NaT instead of leaving
             # them as raw Python/openpyxl objects, which would break .dt.year later.

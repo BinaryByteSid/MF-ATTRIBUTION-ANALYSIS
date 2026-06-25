@@ -33,6 +33,7 @@ dist-ssr/
 *.xlsx
 *.csv
 !backend/app/templates/*.xlsx
+!backend/app/templates/*.csv
 
 # OS files
 Thumbs.db

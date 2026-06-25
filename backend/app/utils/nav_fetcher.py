@@ -42,6 +42,27 @@ def _clean_fund_name(name: str) -> str:
     return cleaned
 
 
+def _find_data_file(filename: str) -> str | None:
+    import os
+    # 1. Check in backend/app/templates
+    templates_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "templates"))
+    path = os.path.join(templates_dir, filename)
+    if os.path.exists(path):
+        return path
+        
+    # 2. Check in workspace root (parent of backend)
+    workspace_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+    path = os.path.join(workspace_root, filename)
+    if os.path.exists(path):
+        return path
+        
+    # 3. Check in current directory
+    if os.path.exists(filename):
+        return filename
+        
+    return None
+
+
 def search_scheme_code(isin: str = "", name: str = "") -> Optional[int]:
     """
     Search for an AMFI scheme code given an ISIN or fund name.
@@ -55,6 +76,22 @@ def search_scheme_code(isin: str = "", name: str = "") -> Optional[int]:
         return _isin_to_code[isin]
     if name and name.lower() in _name_to_code:
         return _name_to_code[name.lower()]
+
+    # Strategy 0: Search ISIN in local CSV file
+    if isin:
+        try:
+            csv_path = _find_data_file("nav_until_2026-05-31.csv")
+            if csv_path:
+                import pandas as pd
+                df = pd.read_csv(csv_path, usecols=["Scheme Code", "ISIN Div Payout/ ISIN Growth"])
+                matches = df[df["ISIN Div Payout/ ISIN Growth"].astype(str).str.strip().str.upper() == isin]
+                if not matches.empty:
+                    code = int(matches.iloc[0]["Scheme Code"])
+                    _isin_to_code[isin] = code
+                    print(f"[nav_fetcher] Found local Scheme Code {code} for ISIN {isin}")
+                    return code
+        except Exception as e:
+            print(f"[nav_fetcher] Local ISIN lookup failed: {e}")
 
     # Strategy 1: Search by name keywords
     search_terms = []
@@ -134,6 +171,7 @@ def fetch_nav_history(scheme_code: int) -> list[tuple[date, float]]:
     """
     Fetch full historical NAV data for a scheme.
     Returns list of (date, nav) sorted ascending by date.
+    Automatically adjusts for historical unit splits (drops > 35% in a single day).
     """
     try:
         resp = requests.get(
@@ -159,6 +197,21 @@ def fetch_nav_history(scheme_code: int) -> list[tuple[date, float]]:
 
         # Sort ascending by date
         result.sort(key=lambda x: x[0])
+
+        # Adjust for corporate actions (splits)
+        # If the NAV drops by >35% in a single day, scale all historical NAVs before that day by the ratio.
+        # We verify that both NAVs are > 1.0 and the ratio is >= 0.01 to filter out bad data entries (zero/near-zero values).
+        n = len(result)
+        for i in range(1, n):
+            prev_nav = result[i-1][1]
+            curr_nav = result[i][1]
+            if prev_nav > 1.0 and curr_nav > 1.0:
+                ratio = curr_nav / prev_nav
+                if 0.01 <= ratio <= 0.65:
+                    print(f"[nav_fetcher] Adjusting split on {result[i][0]} for scheme {scheme_code}: ratio={ratio:.4f} (dropped from {prev_nav} to {curr_nav})")
+                    for j in range(i):
+                        result[j] = (result[j][0], result[j][1] * ratio)
+
         return result
 
     except Exception as e:
