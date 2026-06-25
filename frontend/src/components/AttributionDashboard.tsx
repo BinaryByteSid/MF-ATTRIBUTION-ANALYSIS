@@ -860,6 +860,7 @@ export const AttributionDashboard: React.FC = () => {
   const [holdings, setHoldings] = useState<Holding[]>([]);
   const [brinson, setBrinson] = useState<BrinsonSegment[]>([]);
   const [risk, setRisk] = useState<RiskMetrics | null>(null);
+  const [apiMonthlyReturns, setApiMonthlyReturns] = useState<{ date: string; fund_return: number; bench_return: number }[]>([]);
   const [activeTab, setActiveTab] = useState<'overview' | 'comparison' | 'brinson' | 'overlap' | 'reports' | 'performance' | 'copilot'>('overview');
 
   // AI Copilot state
@@ -1426,6 +1427,8 @@ export const AttributionDashboard: React.FC = () => {
     if (!selectedPortfolioId) return;
 
     const loadPortfolioData = async () => {
+      // Reset API monthly returns at start of load (will be re-populated by risk API call)
+      setApiMonthlyReturns([]);
       let summ: PortfolioSummary;
       let holds: Holding[];
       let brin: BrinsonSegment[];
@@ -1540,6 +1543,9 @@ export const AttributionDashboard: React.FC = () => {
                 information_ratio: riskData.information_ratio ?? 0,
                 var_95: riskData.var_95 ?? 0,
               };
+              if (Array.isArray(riskData.monthly_returns) && riskData.monthly_returns.length > 0) {
+                setApiMonthlyReturns(riskData.monthly_returns);
+              }
             } else {
               rsk = calculateRiskMetrics(aligned);
             }
@@ -1619,6 +1625,9 @@ export const AttributionDashboard: React.FC = () => {
                 information_ratio: riskData.information_ratio ?? 0,
                 var_95: riskData.var_95 ?? 0,
               };
+              if (Array.isArray(riskData.monthly_returns) && riskData.monthly_returns.length > 0) {
+                setApiMonthlyReturns(riskData.monthly_returns);
+              }
             } else {
               rsk = calculateRiskMetrics(alignedScheme);
             }
@@ -1684,6 +1693,9 @@ export const AttributionDashboard: React.FC = () => {
               information_ratio: riskData.information_ratio ?? 0,
               var_95: riskData.var_95 ?? 0,
             };
+            if (Array.isArray(riskData.monthly_returns) && riskData.monthly_returns.length > 0) {
+              setApiMonthlyReturns(riskData.monthly_returns);
+            }
           } else {
             rsk = calculateRiskMetrics(aligned);
           }
@@ -2848,46 +2860,79 @@ export const AttributionDashboard: React.FC = () => {
 
               {/* Right Card: Period Returns & Comparison */}
               <div className="glass-card" style={{ margin: 0, padding: '24px' }}>
-                <h3 style={{ margin: '0 0 16px 0', fontSize: '1.25rem', display: 'flex', alignItems: 'center', gap: '10px', fontWeight: 700 }}>
+                <h3 style={{ margin: '0 0 8px 0', fontSize: '1.25rem', display: 'flex', alignItems: 'center', gap: '10px', fontWeight: 700 }}>
                   <Activity size={20} color="var(--accent-emerald)" />
                   <span>Monthly Returns Comparison (Date Range Filtered)</span>
+                  {apiMonthlyReturns.length > 0 && (
+                    <span style={{ fontSize: '0.7rem', fontWeight: 600, padding: '2px 8px', borderRadius: '12px', background: 'rgba(16,185,129,0.15)', color: 'var(--accent-emerald)', border: '1px solid rgba(16,185,129,0.3)' }}>
+                      ✓ Real NAV Data (AMFI)
+                    </span>
+                  )}
                 </h3>
+                {apiMonthlyReturns.length > 0 && (
+                  <p style={{ margin: '0 0 16px 0', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                    Monthly returns calculated using last trading day NAV of each month from AMFI API. Formula: (Last NAV<sub>month</sub> − Last NAV<sub>prev month</sub>) / Last NAV<sub>prev month</sub> × 100
+                  </p>
+                )}
                 
                 {(() => {
-                  const benchmarkFundName = brinsonBenchmarkType === 'scheme' && selectedBenchmarkSchemeName
-                    ? selectedBenchmarkSchemeName
-                    : 'NIFTY 50 TRI';
-                  const retsPortRaw = getEntityMonthlyReturnsList(selectedSchemeName || 'ALL_SCHEMES');
-                  const retsBenchRaw = getEntityMonthlyReturnsList(benchmarkFundName);
-                  const retsNiftyRaw = getEntityMonthlyReturnsList('NIFTY 50 TRI');
-
-                  const [fromY, fromM] = dashboardFromDate.split('-').map(Number);
-                  const [toY, toM] = dashboardToDate.split('-').map(Number);
-                  const fromVal = fromY * 100 + fromM;
-                  const toVal = toY * 100 + toM;
-
-                  const filterFn = (r: any) => {
-                    const rVal = r.year * 100 + r.month;
-                    return rVal >= fromVal && rVal <= toVal;
-                  };
-                  const retsPort = retsPortRaw.filter(filterFn);
-                  const retsBench = retsBenchRaw.filter(filterFn);
-                  const retsNifty = retsNiftyRaw.filter(filterFn);
-
-                  // Align and group by month
+                  // Prefer real NAV-based monthly returns from backend API when available
                   const monthlyRows: any[] = [];
-                  retsPort.forEach((r) => {
-                    const bMatch = retsBench.find(b => b.year === r.year && b.month === r.month);
-                    const nMatch = retsNifty.find(n => n.year === r.year && n.month === r.month);
-                    
-                    const monthName = new Date(r.year, r.month - 1).toLocaleString('default', { month: 'short', year: '2-digit' });
-                    monthlyRows.push({
-                      month: monthName,
-                      portVal: r.returnVal * 100,
-                      benchVal: bMatch ? bMatch.returnVal * 100 : 0,
-                      niftyVal: nMatch ? nMatch.returnVal * 100 : 0,
+
+                  if (apiMonthlyReturns.length > 0) {
+                    // Use actual fund NAV data from AMFI via backend API
+                    const [fromY, fromM] = dashboardFromDate.split('-').map(Number);
+                    const [toY, toM] = dashboardToDate.split('-').map(Number);
+                    const fromVal = fromY * 100 + fromM;
+                    const toVal = toY * 100 + toM;
+
+                    apiMonthlyReturns.forEach((r) => {
+                      const [ry, rm] = r.date.split('-').map(Number);
+                      const rVal = ry * 100 + rm;
+                      if (rVal >= fromVal && rVal <= toVal) {
+                        const monthName = new Date(ry, rm - 1).toLocaleString('default', { month: 'short', year: '2-digit' });
+                        monthlyRows.push({
+                          month: monthName,
+                          portVal: parseFloat((r.fund_return * 100).toFixed(4)),
+                          benchVal: parseFloat((r.bench_return * 100).toFixed(4)),
+                          niftyVal: parseFloat((r.bench_return * 100).toFixed(4)),
+                        });
+                      }
                     });
-                  });
+                  } else {
+                    // Fallback: stock-price-based approximation
+                    const benchmarkFundName = brinsonBenchmarkType === 'scheme' && selectedBenchmarkSchemeName
+                      ? selectedBenchmarkSchemeName
+                      : 'NIFTY 50 TRI';
+                    const retsPortRaw = getEntityMonthlyReturnsList(selectedSchemeName || 'ALL_SCHEMES');
+                    const retsBenchRaw = getEntityMonthlyReturnsList(benchmarkFundName);
+                    const retsNiftyRaw = getEntityMonthlyReturnsList('NIFTY 50 TRI');
+
+                    const [fromY, fromM] = dashboardFromDate.split('-').map(Number);
+                    const [toY, toM] = dashboardToDate.split('-').map(Number);
+                    const fromVal = fromY * 100 + fromM;
+                    const toVal = toY * 100 + toM;
+
+                    const filterFn = (r: any) => {
+                      const rVal = r.year * 100 + r.month;
+                      return rVal >= fromVal && rVal <= toVal;
+                    };
+                    const retsPort = retsPortRaw.filter(filterFn);
+                    const retsBench = retsBenchRaw.filter(filterFn);
+                    const retsNifty = retsNiftyRaw.filter(filterFn);
+
+                    retsPort.forEach((r) => {
+                      const bMatch = retsBench.find(b => b.year === r.year && b.month === r.month);
+                      const nMatch = retsNifty.find(n => n.year === r.year && n.month === r.month);
+                      const monthName = new Date(r.year, r.month - 1).toLocaleString('default', { month: 'short', year: '2-digit' });
+                      monthlyRows.push({
+                        month: monthName,
+                        portVal: r.returnVal * 100,
+                        benchVal: bMatch ? bMatch.returnVal * 100 : 0,
+                        niftyVal: nMatch ? nMatch.returnVal * 100 : 0,
+                      });
+                    });
+                  }
 
                   if (monthlyRows.length === 0) {
                     return (
