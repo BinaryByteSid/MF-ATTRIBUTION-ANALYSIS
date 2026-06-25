@@ -154,7 +154,7 @@ def _compute_nifty_monthly_returns(months_list: list) -> list:
             c_end = float(month_data.sort_values('Date').iloc[-1]['Close'])
             c_start = float(prev_data.sort_values('Date').iloc[-1]['Close'])
             if c_start > 0:
-                returns.append(c_end / c_start - 1.0)
+                returns.append((c_end - c_start) / c_start)
             else:
                 returns.append(0.0)
         else:

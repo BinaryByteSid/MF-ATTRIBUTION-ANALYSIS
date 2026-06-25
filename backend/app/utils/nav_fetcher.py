@@ -355,7 +355,7 @@ def compute_fund_returns(
     nav_1m = get_month_end_nav(nav_history, prev_y, prev_m)
     m1_return = None
     if nav_1m and nav_1m > 0:
-        m1_return = (nav_current / nav_1m - 1) * 100
+        m1_return = ((nav_current - nav_1m) / nav_1m) * 100
 
     # ── 3-Month Return ────────────────────────────────────────────────────
     y3, m3 = year, month - 3
@@ -365,7 +365,7 @@ def compute_fund_returns(
     nav_3m = get_month_end_nav(nav_history, y3, m3)
     m3_return = None
     if nav_3m and nav_3m > 0:
-        m3_return = (nav_current / nav_3m - 1) * 100
+        m3_return = ((nav_current - nav_3m) / nav_3m) * 100
 
     # ── 6-Month Return ────────────────────────────────────────────────────
     y6, m6 = year, month - 6
@@ -375,7 +375,7 @@ def compute_fund_returns(
     nav_6m = get_month_end_nav(nav_history, y6, m6)
     m6_return = None
     if nav_6m and nav_6m > 0:
-        m6_return = (nav_current / nav_6m - 1) * 100
+        m6_return = ((nav_current - nav_6m) / nav_6m) * 100
 
     # ── FYTD Return (Financial Year starts April 1) ───────────────────────
     fy_year = year if month >= 4 else year - 1
@@ -386,7 +386,7 @@ def compute_fund_returns(
         nav_fy = get_month_end_nav(nav_history, fy_year, 4)
     fytd_return = None
     if nav_fy and nav_fy > 0:
-        fytd_return = (nav_current / nav_fy - 1) * 100
+        fytd_return = ((nav_current - nav_fy) / nav_fy) * 100
 
     # ── Since Inception Return (CAGR) ─────────────────────────────────────
     inception_date, nav_inception = nav_history[0]
@@ -435,7 +435,7 @@ def get_monthly_returns(
         nav_start = get_month_end_nav(nav_history, prev_y, prev_m)
 
         if nav_end and nav_start and nav_start > 0:
-            returns.append(nav_end / nav_start - 1.0)
+            returns.append((nav_end - nav_start) / nav_start)
         else:
             returns.append(None)
 
@@ -658,16 +658,323 @@ def fetch_fund_and_bench_returns(
             bench_monthly = get_monthly_returns(bench_nav, months_list)
             result["bench_monthly_returns"] = [r for r in bench_monthly if r is not None]
 
-        # Compute risk metrics if we have enough data
-        valid_fund = [r for r in fund_monthly if r is not None]
-        valid_bench = [r for r in (get_monthly_returns(bench_nav, months_list) if bench_nav else []) if r is not None]
-
-        if len(valid_fund) >= 2 and len(valid_bench) >= 2:
-            # Align lengths
+            valid_fund = result["fund_monthly_returns"]
+            valid_bench = result["bench_monthly_returns"]
             min_len = min(len(valid_fund), len(valid_bench))
-            result["risk_metrics"] = compute_risk_metrics_from_nav(
-                valid_fund[:min_len],
-                valid_bench[:min_len],
-            )
+            if min_len >= 2:
+                result["risk_metrics"] = compute_risk_metrics_from_nav(
+                    valid_fund[:min_len],
+                    valid_bench[:min_len],
+                )
 
     return result
+
+
+# ── AMFI Fund Performance Polling API Integration ────────────────────────────
+
+def map_section_to_ids(sec: str) -> tuple[int, int, int]:
+    """Map category description (section) to AMFI API maturity, category, and subcategory IDs."""
+    sec_lower = str(sec).lower()
+    
+    # Maturity Type
+    maturity_id = 1  # Open ended default
+    if "close" in sec_lower:
+        maturity_id = 2
+    elif "interval" in sec_lower:
+        maturity_id = 2
+        
+    # Category
+    cat_id = 1  # Equity default
+    if "debt" in sec_lower:
+        cat_id = 2
+    elif "hybrid" in sec_lower:
+        cat_id = 3
+    elif "solution" in sec_lower:
+        cat_id = 4
+    elif "other" in sec_lower:
+        cat_id = 5
+    elif "gilt" in sec_lower or "money market" in sec_lower or "income" in sec_lower:
+        cat_id = 2
+        
+    # Subcategory defaults
+    if cat_id == 1:
+        sub_id = 1
+    elif cat_id == 2:
+        sub_id = 15
+    elif cat_id == 3:
+        sub_id = 30
+    elif cat_id == 4:
+        sub_id = 36
+    elif cat_id == 5:
+        sub_id = 38
+    else:
+        sub_id = 1
+    
+    # Subcategory mapping rules
+    if cat_id == 1:  # Equity
+        if "large & mid" in sec_lower:
+            sub_id = 2
+        elif "large cap" in sec_lower:
+            sub_id = 1
+        elif "flexi cap" in sec_lower:
+            sub_id = 3
+        elif "multi cap" in sec_lower:
+            sub_id = 4
+        elif "mid cap" in sec_lower:
+            sub_id = 5
+        elif "small cap" in sec_lower:
+            sub_id = 6
+        elif "value" in sec_lower:
+            sub_id = 7
+        elif "elss" in sec_lower:
+            sub_id = 8
+        elif "contra" in sec_lower:
+            sub_id = 9
+        elif "dividend yield" in sec_lower:
+            sub_id = 10
+        elif "focused" in sec_lower:
+            sub_id = 11
+        elif "sectoral" in sec_lower or "thematic" in sec_lower:
+            sub_id = 12
+    elif cat_id == 2:  # Debt
+        if "gilt with 10" in sec_lower or "10 year constant" in sec_lower:
+            sub_id = 29
+        elif "gilt" in sec_lower:
+            sub_id = 28
+        elif "medium to long" in sec_lower:
+            sub_id = 14
+        elif "long duration" in sec_lower:
+            sub_id = 13
+        elif "ultra short" in sec_lower:
+            sub_id = 19
+        elif "short duration" in sec_lower:
+            sub_id = 15
+        elif "medium duration" in sec_lower:
+            sub_id = 16
+        elif "money market" in sec_lower:
+            sub_id = 17
+        elif "low duration" in sec_lower:
+            sub_id = 18
+        elif "liquid" in sec_lower:
+            sub_id = 20
+        elif "overnight" in sec_lower:
+            sub_id = 21
+        elif "dynamic bond" in sec_lower:
+            sub_id = 22
+        elif "corporate bond" in sec_lower:
+            sub_id = 23
+        elif "credit risk" in sec_lower:
+            sub_id = 24
+        elif "banking" in sec_lower or "psu" in sec_lower:
+            sub_id = 25
+        elif "floater" in sec_lower:
+            sub_id = 26
+        elif "fmp" in sec_lower:
+            sub_id = 27
+    elif cat_id == 3:  # Hybrid
+        if "aggressive hybrid" in sec_lower:
+            sub_id = 30
+        elif "conservative hybrid" in sec_lower or "conservative hyrbid" in sec_lower:
+            sub_id = 31
+        elif "equity savings" in sec_lower:
+            sub_id = 32
+        elif "arbitrage" in sec_lower:
+            sub_id = 33
+        elif "multi asset" in sec_lower:
+            sub_id = 34
+        elif "dynamic asset" in sec_lower or "balanced advantage" in sec_lower:
+            sub_id = 35
+        elif "balanced hybrid" in sec_lower:
+            sub_id = 40
+    elif cat_id == 4:  # Solution Oriented
+        if "children" in sec_lower:
+            sub_id = 36
+        elif "retirement" in sec_lower:
+            sub_id = 37
+    elif cat_id == 5:  # Other
+        if "index fund" in sec_lower or "index" in sec_lower:
+            sub_id = 38
+        elif "etf" in sec_lower:
+            sub_id = 38
+        elif "fof" in sec_lower or "fund of funds" in sec_lower:
+            sub_id = 39
+        
+    return maturity_id, cat_id, sub_id
+
+
+def clean_name(name: str) -> str:
+    """Normalize fund name for matching by removing common suffixes."""
+    n = str(name).lower()
+    n = n.replace("flexicap", "flexi cap")
+    n = n.replace("multicap", "multi cap")
+    n = n.replace("midcap", "mid cap")
+    n = n.replace("smallcap", "small cap")
+    n = n.replace("largecap", "large cap")
+    
+    n = n.replace("-", " ").replace("/", " ").replace("(", " ").replace(")", " ")
+    tokens = n.split()
+    suffixes_to_remove = {
+        "direct", "regular", "retail", "plan", "growth", "option", "idcw", "dividend", 
+        "payout", "reinvestment", "annual", "monthly", "weekly", "quarterly", "fortnightly",
+        "bonus", "fund"
+    }
+    cleaned_tokens = [t for t in tokens if t not in suffixes_to_remove]
+    return " ".join(cleaned_tokens)
+
+
+def find_matching_perf_row(nav_name: str, perf_rows: list) -> dict | None:
+    """Fuzzy match a NAV fund name against the performance records list."""
+    if not perf_rows:
+        return None
+    cleaned_nav = clean_name(nav_name)
+    if not cleaned_nav:
+        return None
+        
+    # 1. Substring match
+    for p_row in perf_rows:
+        p_name = p_row.get("schemeName") or ""
+        cleaned_perf = clean_name(p_name)
+        if cleaned_perf and (cleaned_perf in cleaned_nav or cleaned_nav in cleaned_perf):
+            return p_row
+            
+    # 2. Token overlap fallback
+    nav_tokens = set(cleaned_nav.split())
+    best_row = None
+    best_score = 0.0
+    for p_row in perf_rows:
+        p_name = p_row.get("schemeName") or ""
+        cleaned_perf = clean_name(p_name)
+        if not cleaned_perf:
+            continue
+        perf_tokens = set(cleaned_perf.split())
+        intersection = nav_tokens.intersection(perf_tokens)
+        if intersection:
+            score = len(intersection) / len(nav_tokens.union(perf_tokens))
+            if score > best_score:
+                best_score = score
+                best_row = p_row
+                
+    if best_score > 0.4:
+        return best_row
+    return None
+
+
+_perf_api_cache = {}
+
+def get_performance_stats(fund_name: str, category: str, date_str: str, is_direct: bool = False) -> dict | None:
+    """
+    Fetch performance stats (AUM, category returns, and ranks) for a given fund and category on a specific date.
+    
+    Args:
+        fund_name: Clean name of the fund
+        category: Fund category string
+        date_str: Target date in DD-MMM-YYYY format
+        is_direct: True if Direct plan, False if Regular plan
+        
+    Returns:
+        Dict with keys: fund_aum, category_returns, ranks or None.
+    """
+    maturity_id, cat_id, sub_id = map_section_to_ids(category)
+    key = (date_str, maturity_id, cat_id, sub_id)
+    
+    # 1. Check in cache
+    if key in _perf_api_cache:
+        rows = _perf_api_cache[key]
+    else:
+        url = "https://www.amfiindia.com/gateway/pollingsebi/api/amfi/fundperformance"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "maturityType": maturity_id,
+            "category": cat_id,
+            "subCategory": sub_id,
+            "mfid": 0,
+            "reportDate": date_str
+        }
+        
+        import time
+        max_retries = 3
+        backoff = 0.5
+        rows = []
+        
+        for attempt in range(max_retries):
+            try:
+                resp = requests.post(url, json=payload, headers=headers, timeout=15)
+                if resp.status_code == 200:
+                    res_data = resp.json()
+                    if res_data.get("validationMsg") == "SUCCESS":
+                        rows = res_data.get("data", [])
+                        _perf_api_cache[key] = rows
+                        break
+            except Exception as e:
+                print(f"[nav_fetcher] AMFI performance fetch attempt {attempt+1} failed: {e}")
+            if attempt < max_retries - 1:
+                time.sleep(backoff)
+                backoff *= 2
+                
+        if not rows:
+            _perf_api_cache[key] = []
+            return None
+
+    if not rows:
+        return None
+        
+    # Find matching fund row
+    match = find_matching_perf_row(fund_name, rows)
+    if not match:
+        return None
+        
+    fund_aum = float(match.get("dailyAUM")) if match.get("dailyAUM") else None
+    
+    period_keys = [
+        ("1M", "return1MonthRegular", "return1MonthDirect"),
+        ("3M", "return3MonthRegular", "return3MonthDirect"),
+        ("6M", "return6MonthRegular", "return6MonthDirect"),
+        ("1Y", "return1YearRegular", "return1YearDirect"),
+        ("SI", "returnSinceLaunchRegular", "returnSinceLaunchDirect")
+    ]
+    
+    stats = {
+        "fund_aum": fund_aum,
+        "category_returns": {},
+        "ranks": {}
+    }
+    
+    for label, reg_key, dir_key in period_keys:
+        val_key = dir_key if is_direct else reg_key
+        
+        # Collect returns for category average and ranking
+        valid_rets = []
+        for r in rows:
+            val = r.get(val_key)
+            if val is not None and val != "":
+                try:
+                    valid_rets.append(float(val))
+                except ValueError:
+                    pass
+                    
+        if not valid_rets:
+            stats["category_returns"][label] = None
+            stats["ranks"][label] = (None, None)
+            continue
+            
+        # Category average return
+        stats["category_returns"][label] = round(sum(valid_rets) / len(valid_rets), 4)
+        
+        # Fund's rank
+        fund_val_str = match.get(val_key)
+        if fund_val_str is not None and fund_val_str != "":
+            try:
+                fund_val = float(fund_val_str)
+                sorted_rets = sorted(valid_rets, reverse=True)
+                rank_num = sorted_rets.index(fund_val) + 1
+                rank_den = len(sorted_rets)
+                stats["ranks"][label] = (rank_num, rank_den)
+            except (ValueError, IndexError):
+                stats["ranks"][label] = (None, None)
+        else:
+            stats["ranks"][label] = (None, None)
+            
+    return stats

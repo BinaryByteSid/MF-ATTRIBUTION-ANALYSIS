@@ -14,6 +14,7 @@ try:
         compute_risk_metrics_from_nav,
         _get_nav_history_for_fund,
         get_month_end_nav,
+        get_performance_stats,
     )
     NAV_FETCHER_AVAILABLE = True
 except ImportError:
@@ -307,7 +308,7 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
         val_end = row[col_end]
         val_start = row[col_start]
         if pd.notna(val_end) and pd.notna(val_start) and val_start > 0:
-            return float(val_end) / float(val_start) - 1.0
+            return (float(val_end) - float(val_start)) / float(val_start)
         return None
 
     # 1. Read metadata from "Expense ratio & fund manager.xlsx"
@@ -658,6 +659,20 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
             sheet.title = sheet_name
         else:
             sheet: any = wb[sheet_name]
+
+        # Fetch actual AMFI performance stats if available
+        fund_stats = None
+        bench_stats = None
+        if NAV_FETCHER_AVAILABLE:
+            try:
+                is_direct = "direct" in fund_name.lower() or "direct" in isin.lower()
+                d_end_for_stats = get_last_trading_day(year, month)
+                date_str_for_stats = d_end_for_stats.strftime("%d-%b-%Y")
+                fund_stats = get_performance_stats(fund_name, category, date_str_for_stats, is_direct=is_direct)
+                if bench_name:
+                    bench_stats = get_performance_stats(bench_name, category, date_str_for_stats, is_direct=False)
+            except Exception as e:
+                print(f"[tracker_excel] Error fetching AMFI performance stats for {year}-{month}: {e}")
             
         # Get portfolio holdings for this scheme and month
         match_month = pd.DataFrame()
@@ -685,6 +700,10 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
             month_offset = (2026 - year) * 12 + (4 - month)
             aum_multiplier = 1.0 - (month_offset * 0.012) + ((seed + month) % 5 - 2) * 0.002
             aum = round(base_aum * aum_multiplier, 4)
+        
+        # Overwrite with actual AUM from AMFI if available
+        if fund_stats and fund_stats.get("fund_aum") is not None:
+            aum = fund_stats["fund_aum"]
 
         # Look up expense ratio
         exr = 0.0133
@@ -719,6 +738,10 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
             if bench_aum is None:
                 b_seed = get_fund_seed(bench_name)
                 bench_aum = round((b_seed % 35 + 15) * 1000 + (b_seed % 97) + 0.56, 4)
+            
+            # Overwrite with actual AUM from AMFI if available
+            if bench_stats and bench_stats.get("fund_aum") is not None:
+                bench_aum = bench_stats["fund_aum"]
 
             # Look up benchmark expense ratio
             bench_exr = 0.0133
@@ -758,7 +781,7 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
         m_1m = month - 1 if month > 1 else 12
         d_1m = get_last_trading_day(y_1m, m_1m)
         c_1m = get_nifty_close(d_1m)
-        nifty_1m = (c_end / c_1m - 1) * 100
+        nifty_1m = ((c_end - c_1m) / c_1m) * 100
         
         y_3m, m_3m = year, month - 3
         if m_3m <= 0:
@@ -766,7 +789,7 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
             y_3m -= 1
         d_3m = get_last_trading_day(y_3m, m_3m)
         c_3m = get_nifty_close(d_3m)
-        nifty_3m = (c_end / c_3m - 1) * 100
+        nifty_3m = ((c_end - c_3m) / c_3m) * 100
         
         y_6m, m_6m = year, month - 6
         if m_6m <= 0:
@@ -774,12 +797,12 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
             y_6m -= 1
         d_6m = get_last_trading_day(y_6m, m_6m)
         c_6m = get_nifty_close(d_6m)
-        nifty_6m = (c_end / c_6m - 1) * 100
+        nifty_6m = ((c_end - c_6m) / c_6m) * 100
         
         fy_year = year if month >= 4 else year - 1
         d_fy = pd.Timestamp(fy_year, 4, 1)
         c_fy = get_nifty_close(d_fy)
-        nifty_fy = (c_end / c_fy - 1) * 100
+        nifty_fy = ((c_end - c_fy) / c_fy) * 100
         
         d_si = pd.Timestamp(2021, 1, 1)
         c_si = get_nifty_close(d_si)
@@ -839,8 +862,30 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
         ]
 
         # ── CATEGORY RANK: Not computable without full category data ──
-        rank_den_si, rank_den_fy, rank_den_6m, rank_den_3m, rank_den_1m = "N/A", "N/A", "N/A", "N/A", "N/A"
         rank_num_si, rank_num_fy, rank_num_6m, rank_num_3m, rank_num_1m = "N/A", "N/A", "N/A", "N/A", "N/A"
+        rank_den_si, rank_den_fy, rank_den_6m, rank_den_3m, rank_den_1m = "N/A", "N/A", "N/A", "N/A", "N/A"
+
+        # Update category returns and ranks with real AMFI performance stats if available
+        if fund_stats:
+            # Mapping indices to AMFI period labels
+            labels = ["SI", "1Y", "6M", "3M", "1M"]
+            rank_nums = [rank_num_si, rank_num_fy, rank_num_6m, rank_num_3m, rank_num_1m]
+            rank_dens = [rank_den_si, rank_den_fy, rank_den_6m, rank_den_3m, rank_den_1m]
+            
+            for idx, lbl in enumerate(labels):
+                # 1. Overwrite category return if available in fund_stats
+                cat_val = fund_stats["category_returns"].get(lbl)
+                if cat_val is not None:
+                    cat_rets[idx] = cat_val
+                
+                # 2. Overwrite rank if available in fund_stats
+                r_num, r_den = fund_stats["ranks"].get(lbl, (None, None))
+                if r_num is not None:
+                    rank_nums[idx] = r_num
+                    rank_dens[idx] = r_den
+                    
+            rank_num_si, rank_num_fy, rank_num_6m, rank_num_3m, rank_num_1m = rank_nums
+            rank_den_si, rank_den_fy, rank_den_6m, rank_den_3m, rank_den_1m = rank_dens
 
         # Populate returns
         for idx, row_num in enumerate([7, 8, 9, 10, 11]):
