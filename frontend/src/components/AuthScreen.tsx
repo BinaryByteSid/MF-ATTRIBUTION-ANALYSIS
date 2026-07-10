@@ -7,8 +7,8 @@ interface AuthScreenProps {
 }
 
 const SECURITY_QUESTIONS = [
-  "What is your mother's maiden name?",
-  "What was the name of your first pet?",
+  "What is your mother's name?",
+  "Enter your name and surname.",
   "In what city were you born?",
   "What was the name of your first school?",
   "What is your favorite book?"
@@ -18,19 +18,19 @@ type AuthMode = 'login' | 'register' | 'forgot';
 
 export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
   const [mode, setMode] = useState<AuthMode>('login');
-  
+
   // Input fields
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
   const [securityQuestion, setSecurityQuestion] = useState(SECURITY_QUESTIONS[0]);
   const [securityAnswer, setSecurityAnswer] = useState('');
-  
+
   // Forgot password specific fields
   const [forgotStep, setForgotStep] = useState<1 | 2>(1);
   const [fetchedQuestion, setFetchedQuestion] = useState('');
   const [newPassword, setNewPassword] = useState('');
-  
+
   // Status states
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -67,7 +67,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
     e.preventDefault();
     setError(null);
     setSuccess(null);
-    
+
     if (password.length < 8) {
       setError('Password must be at least 8 characters long');
       return;
@@ -124,7 +124,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
   const handleForgotReset = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    
+
     if (newPassword.length < 8) {
       setError('Password must be at least 8 characters long');
       return;
@@ -237,7 +237,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
         maxWidth: '1050px',
         alignItems: 'stretch',
       }} className="auth-grid-container">
-        
+
         {/* Left Side: Informative Panel */}
         <div className="informative-panel" style={{
           display: 'flex',
@@ -280,7 +280,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
 
           {/* Features Checklist */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', marginTop: '16px' }}>
-            
+
             <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
               <div style={{
                 background: 'rgba(16, 185, 129, 0.1)',
@@ -436,7 +436,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
               )}
 
               {/* Workflows */}
-              
+
               {/* LOGIN WORKFLOW */}
               {mode === 'login' && (
                 <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
@@ -665,7 +665,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
                     </form>
                   ) : (
                     <form onSubmit={handleForgotReset} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                      
+
                       {/* Security Question Prompt */}
                       <div style={{
                         padding: '12px',
@@ -735,7 +735,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
                       </button>
                     </form>
                   )}
-                  
+
                   <div style={{ marginTop: '20px', textAlign: 'center' }}>
                     <button
                       type="button"
