@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Mail, Lock, User, Shield, ArrowRight, Loader2, AlertCircle, CheckCircle2, KeyRound, HelpCircle, BarChart3, TrendingUp, ShieldAlert, Award } from 'lucide-react';
+import { Mail, Lock, User, Shield, ArrowRight, Loader2, AlertCircle, CheckCircle2, KeyRound, HelpCircle, BarChart3, TrendingUp, ShieldAlert } from 'lucide-react';
 import { login, register, forgotPasswordVerify, forgotPasswordReset, getCurrentUser } from '../api';
 
 interface AuthScreenProps {
