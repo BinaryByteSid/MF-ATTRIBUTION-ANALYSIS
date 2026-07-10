@@ -353,12 +353,41 @@ export const login = async (email: string, password: string) => {
   return res.data;
 };
 
-export const register = async (email: string, password: string, fullName: string, role = 'investor') => {
+export const register = async (
+  email: string,
+  password: string,
+  fullName: string,
+  role = 'investor',
+  securityQuestion?: string,
+  securityAnswer?: string
+) => {
   const res = await api.post('/auth/register', {
     email,
     password,
     full_name: fullName,
     role,
+    security_question: securityQuestion,
+    security_answer: securityAnswer,
+  });
+  return res.data;
+};
+
+export const forgotPasswordVerify = async (email: string) => {
+  const res = await api.post('/auth/forgot-password/verify', { email });
+  return res.data;
+};
+
+export const forgotPasswordReset = async (
+  email: string,
+  securityQuestion: string,
+  securityAnswer: string,
+  newPassword: string
+) => {
+  const res = await api.post('/auth/forgot-password/reset', {
+    email,
+    security_question: securityQuestion,
+    security_answer: securityAnswer,
+    new_password: newPassword,
   });
   return res.data;
 };

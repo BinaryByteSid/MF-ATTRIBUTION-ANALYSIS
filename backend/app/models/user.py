@@ -30,6 +30,8 @@ class User(Base, TimestampMixin):
         server_default="investor",
     )
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    security_question: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    security_answer: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     # Relationships
     portfolios: Mapped[list["Portfolio"]] = relationship("Portfolio", back_populates="user", cascade="all, delete-orphan")

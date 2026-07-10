@@ -24,6 +24,11 @@ async def init_db() -> None:
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        for col in ["security_question", "security_answer"]:
+            try:
+                await conn.execute(text(f"ALTER TABLE users ADD COLUMN {col} VARCHAR(255)"))
+            except Exception:
+                pass
 
     async with AsyncSessionLocal() as db:
         await _seed_asset_classes(db)

@@ -134,3 +134,60 @@ async def test_change_password(client: AsyncClient):
         json={"email": email, "password": "newpassword12"},
     )
     assert resp2.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_forgot_password_workflow(client: AsyncClient):
+    email = f"forgot_{uuid.uuid4().hex[:8]}@test.com"
+    question = "What is your mother's maiden name?"
+    answer = "Smith"
+    
+    # Register with security question
+    await client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": email,
+            "password": "oldpassword12",
+            "security_question": question,
+            "security_answer": answer
+        },
+    )
+    
+    # Verify email
+    resp_verify = await client.post(
+        "/api/v1/auth/forgot-password/verify",
+        json={"email": email}
+    )
+    assert resp_verify.status_code == 200
+    assert resp_verify.json()["security_question"] == question
+    
+    # Reset password fails with wrong answer
+    resp_reset_fail = await client.post(
+        "/api/v1/auth/forgot-password/reset",
+        json={
+            "email": email,
+            "security_question": question,
+            "security_answer": "WrongAnswer",
+            "new_password": "newpassword12"
+        }
+    )
+    assert resp_reset_fail.status_code == 400
+    
+    # Reset password succeeds with correct answer
+    resp_reset_success = await client.post(
+        "/api/v1/auth/forgot-password/reset",
+        json={
+            "email": email,
+            "security_question": question,
+            "security_answer": "smith",  # case-insensitive check
+            "new_password": "newpassword12"
+        }
+    )
+    assert resp_reset_success.status_code == 200
+    
+    # Verify login works with new password
+    resp_login = await client.post(
+        "/api/v1/auth/login",
+        json={"email": email, "password": "newpassword12"}
+    )
+    assert resp_login.status_code == 200

@@ -15,6 +15,8 @@ class UserBase(BaseModel):
 
 class UserCreate(UserBase):
     password: str
+    security_question: Optional[str] = None
+    security_answer: Optional[str] = None
 
     @field_validator("password")
     @classmethod
@@ -36,6 +38,7 @@ class UserResponse(UserBase):
     id: uuid.UUID
     is_active: bool
     created_at: datetime
+    security_question: Optional[str] = None
 
 
 class UserPublic(BaseModel):

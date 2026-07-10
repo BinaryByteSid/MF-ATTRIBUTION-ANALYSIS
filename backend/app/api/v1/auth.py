@@ -173,3 +173,50 @@ async def change_password(
     )
     await db.commit()
     return {"message": "Password updated successfully"}
+
+
+from pydantic import BaseModel, EmailStr
+
+class ForgotPasswordVerifyRequest(BaseModel):
+    email: EmailStr
+
+class ForgotPasswordResetRequest(BaseModel):
+    email: EmailStr
+    security_question: str
+    security_answer: str
+    new_password: str
+
+@router.post("/forgot-password/verify")
+async def forgot_password_verify(body: ForgotPasswordVerifyRequest, db: AsyncSession = Depends(get_db)):
+    user = await crud_user.get_by_email(db, email=body.email)
+    if not user:
+        raise HTTPException(status_code=404, detail="No account found with this email address")
+    if not user.security_question:
+        raise HTTPException(status_code=400, detail="This account does not have a security question configured")
+    return {"security_question": user.security_question}
+
+@router.post("/forgot-password/reset")
+async def forgot_password_reset(body: ForgotPasswordResetRequest, db: AsyncSession = Depends(get_db)):
+    if len(body.new_password) < 8:
+        raise HTTPException(status_code=400, detail="New password must be at least 8 characters long")
+    user = await crud_user.get_by_email(db, email=body.email)
+    if not user:
+        raise HTTPException(status_code=404, detail="No account found with this email address")
+    if not user.security_question or not user.security_answer:
+        raise HTTPException(status_code=400, detail="This account does not have security question configured")
+    
+    if user.security_question != body.security_question:
+        raise HTTPException(status_code=400, detail="Incorrect security question")
+    
+    if user.security_answer.strip().lower() != body.security_answer.strip().lower():
+        raise HTTPException(status_code=400, detail="Incorrect answer to the security question")
+    
+    await crud_user.update_password(db, user=user, new_password=body.new_password)
+    
+    await db.execute(
+        update(RefreshToken)
+        .where(RefreshToken.user_id == user.id)
+        .values(revoked=True)
+    )
+    await db.commit()
+    return {"message": "Password reset successful"}

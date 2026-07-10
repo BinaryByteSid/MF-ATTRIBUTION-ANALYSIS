@@ -23,6 +23,8 @@ class CRUDUser(CRUDBase[User, UserCreate, UserUpdate]):
             hashed_password=get_password_hash(obj_in.password),
             full_name=obj_in.full_name,
             role=obj_in.role,
+            security_question=obj_in.security_question,
+            security_answer=obj_in.security_answer.strip().lower() if obj_in.security_answer else None,
         )
         db.add(db_obj)
         await db.commit()
