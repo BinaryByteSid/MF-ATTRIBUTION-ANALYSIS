@@ -348,7 +348,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
         </div>
 
         {/* Right Side: Form Card */}
-        <div style={{ display: 'flex', flexDirection: 'column', justifycontent: 'center' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
           <div className="glass-card" style={{
             width: '100%',
             padding: '36px 30px',
@@ -456,16 +456,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
                   </div>
 
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 500 }}>Password</label>
-                      <button
-                        type="button"
-                        onClick={() => { setMode('forgot'); setError(null); setSuccess(null); setForgotStep(1); }}
-                        style={{ background: 'none', border: 'none', color: 'var(--accent-blue)', cursor: 'pointer', padding: 0, fontSize: '0.8rem', fontWeight: 600 }}
-                      >
-                        Forgot password?
-                      </button>
-                    </div>
+                    <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 500 }}>Password</label>
                     <div style={{ position: 'relative' }}>
                       <Lock size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
                       <input
@@ -476,6 +467,24 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
                         onChange={(e) => setPassword(e.target.value)}
                         style={{ width: '100%', paddingLeft: '38px', boxSizing: 'border-box' }}
                       />
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '4px' }}>
+                      <button
+                        type="button"
+                        onClick={() => { setMode('forgot'); setError(null); setSuccess(null); setForgotStep(1); }}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: '#60a5fa',
+                          cursor: 'pointer',
+                          padding: 0,
+                          fontSize: '0.825rem',
+                          fontWeight: 600,
+                          textDecoration: 'underline'
+                        }}
+                      >
+                        Forgot password?
+                      </button>
                     </div>
                   </div>
 
