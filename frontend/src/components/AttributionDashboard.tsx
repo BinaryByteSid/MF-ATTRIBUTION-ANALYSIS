@@ -1522,18 +1522,30 @@ export const AttributionDashboard: React.FC = () => {
             brinsonBenchmarkType === 'scheme' ? selectedBenchmarkSchemeName : undefined, 
             cumBench
           );
-          // Fetch risk metrics from backend API for consistency with Excel report
+          // Fetch risk metrics from backend API for consistency with Excel report.
+          // A whole multi-scheme portfolio has no NAV of its own, so the backend
+          // can only return real values when the portfolio is a single scheme —
+          // pass that scheme's name+ISIN. Otherwise compute locally from the
+          // aggregated portfolio returns.
           try {
             const apiBaseUrl = API_BASE_URL;
             const benchNameParam = brinsonBenchmarkType === 'scheme' && selectedBenchmarkSchemeName
               ? selectedBenchmarkSchemeName : '';
-            const riskUrl = `${apiBaseUrl}/reports/risk-metrics?fund_name=${encodeURIComponent(customFileName || 'Custom Uploaded Portfolio')}&from_date=${dashboardFromDate}&to_date=${dashboardToDate}&bench_name=${encodeURIComponent(benchNameParam)}`;
+            const benchIsinParam = benchNameParam
+              ? (customHoldings.find(h => h.scheme_name === benchNameParam)?.isin || '') : '';
+            const singleScheme = customHoldings.length === 1 ? customHoldings[0] : null;
+            if (!singleScheme) throw new Error('multi-scheme portfolio: compute locally');
+            const riskUrl = `${apiBaseUrl}/reports/risk-metrics?fund_name=${encodeURIComponent(singleScheme.scheme_name)}&isin=${encodeURIComponent(singleScheme.isin || '')}&from_date=${dashboardFromDate}&to_date=${dashboardToDate}&bench_name=${encodeURIComponent(benchNameParam)}&bench_isin=${encodeURIComponent(benchIsinParam)}`;
             const token = localStorage.getItem('access_token');
             const riskResp = await fetch(riskUrl, {
               headers: token ? { 'Authorization': `Bearer ${token}` } : {},
             });
             if (riskResp.ok) {
               const riskData = await riskResp.json();
+              // risk_obs_days is only present when the backend computed from
+              // real NAV data; without it the response is a synthetic fallback
+              // and the local calculation is more truthful.
+              if (riskData.risk_obs_days == null) throw new Error('backend fallback: compute locally');
               rsk = {
                 sharpe_ratio: riskData.sharpe_ratio ?? 0,
                 sortino_ratio: riskData.sortino_ratio ?? 0,
@@ -1604,18 +1616,26 @@ export const AttributionDashboard: React.FC = () => {
           );
 
           const alignedScheme = alignReturns(retsH, retsBenchScheme);
-          // Fetch risk metrics from backend API for consistency with Excel report
+          // Fetch risk metrics from backend API for consistency with Excel report.
+          // Pass the scheme ISIN so the backend resolves the exact scheme
+          // instead of guessing from the name (names like "...-Reg(G)" often
+          // mis-match on the NAV search).
           try {
             const apiBaseUrl = API_BASE_URL;
             const benchNameParam = brinsonBenchmarkType === 'scheme' && selectedBenchmarkSchemeName
               ? selectedBenchmarkSchemeName : '';
-            const riskUrl = `${apiBaseUrl}/reports/risk-metrics?fund_name=${encodeURIComponent(scheme.scheme_name)}&from_date=${dashboardFromDate}&to_date=${dashboardToDate}&bench_name=${encodeURIComponent(benchNameParam)}`;
+            const benchIsinParam = benchNameParam
+              ? (customHoldings.find(h => h.scheme_name === benchNameParam)?.isin || '') : '';
+            const riskUrl = `${apiBaseUrl}/reports/risk-metrics?fund_name=${encodeURIComponent(scheme.scheme_name)}&isin=${encodeURIComponent(scheme.isin || '')}&from_date=${dashboardFromDate}&to_date=${dashboardToDate}&bench_name=${encodeURIComponent(benchNameParam)}&bench_isin=${encodeURIComponent(benchIsinParam)}`;
             const token = localStorage.getItem('access_token');
             const riskResp = await fetch(riskUrl, {
               headers: token ? { 'Authorization': `Bearer ${token}` } : {},
             });
             if (riskResp.ok) {
               const riskData = await riskResp.json();
+              // Missing risk_obs_days means the backend used its synthetic
+              // fallback — prefer the local calculation over junk values.
+              if (riskData.risk_obs_days == null) throw new Error('backend fallback: compute locally');
               rsk = {
                 sharpe_ratio: riskData.sharpe_ratio ?? 0,
                 sortino_ratio: riskData.sortino_ratio ?? 0,
@@ -1672,18 +1692,23 @@ export const AttributionDashboard: React.FC = () => {
             nifty_weight: getNiftySectorWeight(s.asset_class)
           }));
         }
-        // Fetch risk metrics from backend API for consistency with Excel report
+        // Fetch risk metrics from backend API for consistency with Excel report.
+        // Pass the holding's ISIN so the backend resolves the exact scheme.
         try {
           const apiBaseUrl = API_BASE_URL;
           const fundName = holds.length > 0 ? holds[0].scheme_name : selectedPortfolioId;
+          const fundIsin = holds.length > 0 ? (holds[0].isin || '') : '';
           const benchNameParam = entityB || '';
-          const riskUrl = `${apiBaseUrl}/reports/risk-metrics?fund_name=${encodeURIComponent(fundName)}&from_date=${dashboardFromDate}&to_date=${dashboardToDate}&bench_name=${encodeURIComponent(benchNameParam)}`;
+          const riskUrl = `${apiBaseUrl}/reports/risk-metrics?fund_name=${encodeURIComponent(fundName)}&isin=${encodeURIComponent(fundIsin)}&from_date=${dashboardFromDate}&to_date=${dashboardToDate}&bench_name=${encodeURIComponent(benchNameParam)}`;
           const token = localStorage.getItem('access_token');
           const riskResp = await fetch(riskUrl, {
             headers: token ? { 'Authorization': `Bearer ${token}` } : {},
           });
           if (riskResp.ok) {
             const riskData = await riskResp.json();
+            // Missing risk_obs_days means the backend used its synthetic
+            // fallback — prefer the local calculation over junk values.
+            if (riskData.risk_obs_days == null) throw new Error('backend fallback: compute locally');
             rsk = {
               sharpe_ratio: riskData.sharpe_ratio ?? 0,
               sortino_ratio: riskData.sortino_ratio ?? 0,
