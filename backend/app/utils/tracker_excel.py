@@ -207,7 +207,7 @@ def populate_vertical_metadata_table(ws, fund_name, isin, aum_label, aum, exr, m
         ("Sharpe Ratio", round(risk_sharpe, 2)),
         ("Information Ratio", round(risk_info_ratio, 2)),
         ("Portfolio Beta", round(risk_beta, 2)),
-        ("Jensen's Alpha (%)", round(risk_alpha, 2)),
+        ("Jensen's Alpha (Period %)", round(risk_alpha, 2)),
         ("Correlation", round(risk_correlation, 3) if risk_correlation is not None else "N/A"),
         ("Std Dev (Monthly)", f"{round(std_dev_annual * 100, 2)}%" if std_dev_annual is not None else "N/A"),
     ]
@@ -692,8 +692,12 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
         if df_port is not None:
             match_fund = df_port[df_port[isin_col] == isin.strip().upper()]
             if match_fund.empty:
+                # Match on scheme name as a literal substring (regex=False), so
+                # fund names containing regex-special characters like "(G)",
+                # "+" or "&" still match instead of silently falling back to
+                # mock holdings.
                 name_lower = fund_name.strip().lower()
-                match_fund = df_port[df_port[scheme_name_col].str.lower().str.contains(name_lower)]
+                match_fund = df_port[df_port[scheme_name_col].str.lower().str.contains(name_lower, regex=False, na=False)]
             
             if not match_fund.empty:
                 m_val = year * 100 + month
@@ -741,7 +745,7 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
             if df_port is not None and bench_isin:
                 bench_fund_rows = df_port[df_port[isin_col] == bench_isin.strip().upper()]
                 if bench_fund_rows.empty and bench_name:
-                    bench_fund_rows = df_port[df_port[scheme_name_col].str.lower().str.contains(bench_name.strip().lower(), na=False)]
+                    bench_fund_rows = df_port[df_port[scheme_name_col].str.lower().str.contains(bench_name.strip().lower(), regex=False, na=False)]
                 if not bench_fund_rows.empty:
                     bench_month_rows = bench_fund_rows[bench_fund_rows[month_col] == year * 100 + month]
                     if not bench_month_rows.empty:

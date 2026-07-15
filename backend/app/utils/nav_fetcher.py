@@ -694,11 +694,26 @@ def compute_risk_metrics_daily(
             std_fr, std_br = _std_s(fr), _std_s(br)
             corr = cov / (std_fr * std_br) if (std_fr > 1e-12 and std_br > 1e-12) else None
 
+            # Jensen's Alpha over the ACTUAL analysis period (NOT annualized).
+            # Annualizing a short window inflates alpha to alarming magnitudes
+            # (e.g. +12% for a 3-month-old fund), so report the period value:
+            #   alpha = fund_period_return
+            #           − [rf_period + beta·(bench_period_return − rf_period)]
+            # using compounded (geometric) period returns for both series.
+            def _cum(a):
+                p = 1.0
+                for x in a:
+                    p *= (1 + x)
+                return p - 1
+
+            fund_period = _cum(fr)
+            mkt_period = _cum(br)
+            rf_period = rf_rate * (len(fr) / ann)
+            alpha = (fund_period - (rf_period + beta * (mkt_period - rf_period))) * 100
+
+            # Information ratio stays annualized (active return / tracking error)
             fr_ann = _mean(fr) * ann
             mkt_ann = _mean(br) * ann
-            expected = rf_rate + beta * (mkt_ann - rf_rate)
-            alpha = (fr_ann - expected) * 100
-
             active = [fr[i] - br[i] for i in range(len(fr))]
             te = _std_s(active) * sqrt_ann
             info_ratio = (fr_ann - mkt_ann) / te if te > 1e-9 else 0.0
