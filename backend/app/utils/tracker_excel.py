@@ -4,6 +4,7 @@ import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 import pandas as pd
 import calendar
+from datetime import date
 
 # Real NAV data fetcher
 try:
@@ -12,7 +13,7 @@ try:
         compute_fund_returns as nav_compute_fund_returns,
         get_monthly_returns as nav_get_monthly_returns,
         compute_risk_metrics_from_nav,
-        compute_trailing_risk_metrics,
+        compute_risk_metrics_daily,
         _get_nav_history_for_fund,
         get_month_end_nav,
         get_performance_stats,
@@ -166,7 +167,7 @@ def get_sheet_name(year: int, month: int) -> str:
         return "Dec'2025"
     return f"{m_str}'{y_str}"
 
-def populate_vertical_metadata_table(ws, fund_name, isin, aum_label, aum, exr, manager, bench_name, bench_isin, bench_aum, bench_exr, bench_manager, risk_sharpe, risk_info_ratio, risk_beta, risk_alpha, std_dev_annual=None, monthly_returns_labeled=None):
+def populate_vertical_metadata_table(ws, fund_name, isin, aum_label, aum, exr, manager, bench_name, bench_isin, bench_aum, bench_exr, bench_manager, risk_sharpe, risk_info_ratio, risk_beta, risk_alpha, std_dev_annual=None, monthly_returns_labeled=None, risk_correlation=None):
     risk_border = Border(
         bottom=Side(style="thin", color="D9D9D9"),
         top=Side(style="thin", color="D9D9D9"),
@@ -207,6 +208,7 @@ def populate_vertical_metadata_table(ws, fund_name, isin, aum_label, aum, exr, m
         ("Information Ratio", round(risk_info_ratio, 2)),
         ("Portfolio Beta", round(risk_beta, 2)),
         ("Jensen's Alpha (%)", round(risk_alpha, 2)),
+        ("Correlation", round(risk_correlation, 3) if risk_correlation is not None else "N/A"),
         ("Std Dev (Monthly)", f"{round(std_dev_annual * 100, 2)}%" if std_dev_annual is not None else "N/A"),
     ]
 
@@ -230,6 +232,8 @@ def populate_vertical_metadata_table(ws, fund_name, isin, aum_label, aum, exr, m
                 val_c.number_format = '0.00%'
             elif "Ratio" in label or "Beta" in label or "Alpha" in label:
                 val_c.number_format = '0.00'
+            elif "Correlation" in label:
+                val_c.number_format = '0.000'
             elif "Std Dev" in label or "Return" in label:
                 val_c.number_format = '0.00%'
             else:
@@ -1531,60 +1535,54 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
         else:
             monthly_sheet_std_dev[sheet_name] = None  # not enough data for 1 month
 
-    # ── Trailing-window risk metrics ─────────────────────────────────────────────
-    # Sharpe, Jensen's Alpha, Beta etc. require a statistically meaningful
-    # sample. The report's month range (often ~5 months) is far too short and
-    # yields noise-dominated values (a single bad month dominates, and
-    # annualization amplifies it), so compute these from a longer trailing NAV
-    # window ending at the last report month. The per-month/period RETURNS shown
-    # in the report are unaffected — only the risk matrix uses this window.
-    RISK_WINDOW_MONTHS = 36
+    # ── Analysis-period risk metrics (daily NAV) ─────────────────────────────────
+    # Sharpe, Jensen's Alpha, Beta, Correlation etc. are computed from DAILY NAV
+    # returns over the report's analysis period, benchmarked against the selected
+    # benchmark fund (or Nifty when none is chosen). Daily observations give a
+    # statistically meaningful sample while still describing the actual period —
+    # a window containing a correction correctly shows a negative Sharpe. The
+    # per-month/period RETURNS shown elsewhere in the report are unaffected.
+    risk_correlation = None
     if _use_real_nav and fund_nav_history:
         try:
-            end_y, end_m = months_list[-1]
+            first_y, first_m = months_list[0]
+            last_y, last_m = months_list[-1]
+            # Anchor one month before the first report month so the first daily
+            # return falls inside the analysis window.
+            prev_y = first_y if first_m > 1 else first_y - 1
+            prev_m = first_m - 1 if first_m > 1 else 12
+            start_date = date(prev_y, prev_m, calendar.monthrange(prev_y, prev_m)[1])
+            end_date = date(last_y, last_m, calendar.monthrange(last_y, last_m)[1])
 
-            # Build a Nifty monthly-return lookup to use as the market proxy
-            # when no benchmark fund is selected. Only include months actually
-            # present in the Nifty CSV, to avoid injecting clamped/zero returns.
-            nifty_by_month: dict[tuple[int, int], float] = {}
-            if df_nifty is not None and not bench_nav_history:
-                _dser = pd.DatetimeIndex(df_nifty['Date'])
+            # Benchmark daily series: the selected benchmark fund, else Nifty.
+            bench_daily = bench_nav_history
+            if not bench_daily and df_nifty is not None:
+                bench_daily = [
+                    (pd.Timestamp(r['Date']).date(), float(r['Close']))
+                    for _, r in df_nifty.iterrows()
+                    if pd.notna(r['Date']) and pd.notna(r['Close'])
+                ]
 
-                def _nifty_close_for(yy: int, mm: int):
-                    sub = df_nifty[(_dser.year == yy) & (_dser.month == mm)]
-                    if sub.empty:
-                        return None
-                    return float(sub.sort_values('Date').iloc[-1]['Close'])
-
-                wy, wm = end_y, end_m
-                for _ in range(RISK_WINDOW_MONTHS):
-                    py = wy if wm > 1 else wy - 1
-                    pm = wm - 1 if wm > 1 else 12
-                    c_e = _nifty_close_for(wy, wm)
-                    c_s = _nifty_close_for(py, pm)
-                    if c_e is not None and c_s is not None and c_s > 0:
-                        nifty_by_month[(wy, wm)] = (c_e - c_s) / c_s
-                    wy, wm = py, pm
-
-            trailing_rm = compute_trailing_risk_metrics(
+            daily_rm = compute_risk_metrics_daily(
                 fund_nav_history=fund_nav_history,
-                bench_nav_history=bench_nav_history,
-                end_year=end_y,
-                end_month=end_m,
-                window=RISK_WINDOW_MONTHS,
-                bench_monthly_by_month=nifty_by_month or None,
+                bench_nav_history=bench_daily,
+                start_date=start_date,
+                end_date=end_date,
             )
-            if trailing_rm and trailing_rm.get("window_months", 0) >= 2:
-                _nav_risk_metrics = trailing_rm
+            if daily_rm and daily_rm.get("obs_days", 0) >= 2:
+                _nav_risk_metrics = daily_rm
+                risk_correlation = daily_rm.get("correlation")
                 print(
-                    f"[tracker_excel] Trailing risk metrics over "
-                    f"{trailing_rm.get('window_months')} months: "
-                    f"Sharpe={trailing_rm['sharpe_ratio']}, "
-                    f"Alpha={trailing_rm['alpha']}, Beta={trailing_rm['beta']}, "
-                    f"IR={trailing_rm['information_ratio']}"
+                    f"[tracker_excel] Daily risk metrics over "
+                    f"{daily_rm.get('obs_days')} trading days "
+                    f"({start_date}..{end_date}): "
+                    f"Sharpe={daily_rm['sharpe_ratio']}, "
+                    f"Alpha={daily_rm['alpha']}, Beta={daily_rm['beta']}, "
+                    f"Corr={daily_rm.get('correlation')}, "
+                    f"IR={daily_rm['information_ratio']}"
                 )
         except Exception as e:
-            print(f"[tracker_excel] Trailing risk-metric computation failed: {e}")
+            print(f"[tracker_excel] Daily risk-metric computation failed: {e}")
 
     # ── Compute Diagnostics Risk Matrix ─────────────────────────────────────────
     # Prefer real NAV-based risk metrics, fall back to accumulated monthly returns
@@ -1710,8 +1708,8 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
                 for col_letter in ["D", "F"]:
                     ws[f"{col_letter}{r_orig}"] = None
 
-            # Insert rows: 15 base (14 metrics + 1 std dev) + month return rows
-            extra_rows = 15 + (len(this_month_labeled) if this_month_labeled else 0)
+            # Insert rows: 16 base (15 metrics incl. correlation + 1 std dev) + month return rows
+            extra_rows = 16 + (len(this_month_labeled) if this_month_labeled else 0)
             ws.insert_rows(5, extra_rows)
             
             # Write vertical metadata — pass per-sheet std dev for unique monthly values
@@ -1733,7 +1731,8 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
                 risk_beta=risk_beta,
                 risk_alpha=risk_alpha,
                 std_dev_annual=sheet_std_dev,   # per-sheet monthly std dev
-                monthly_returns_labeled=this_month_labeled
+                monthly_returns_labeled=this_month_labeled,
+                risk_correlation=risk_correlation,
             )
             
             # STEP 2: Write fresh Excess Return formulas at correctly shifted rows

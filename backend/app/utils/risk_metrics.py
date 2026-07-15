@@ -51,7 +51,7 @@ def compute_dashboard_risk_metrics(
         from app.utils.nav_fetcher import (
             fetch_fund_and_bench_returns,
             get_monthly_returns as nav_get_monthly_returns,
-            compute_trailing_risk_metrics,
+            compute_risk_metrics_daily,
             _get_nav_history_for_fund,
         )
 
@@ -102,36 +102,45 @@ def compute_dashboard_risk_metrics(
                     monthly_labels,
                 )
 
-                # Sharpe / Alpha / Beta etc. need a longer sample than the
-                # report window to be meaningful. Recompute them over a trailing
-                # window and overlay them, keeping the report-period
+                # Sharpe / Alpha / Beta / Correlation are computed from DAILY
+                # returns over the analysis period (a handful of month-end points
+                # is too noisy). Overlay them, keeping the report-period
                 # monthly_returns list for the dashboard chart.
                 try:
-                    nifty_by_month = None
-                    if not bench_nav_history:
-                        nifty_by_month = _nifty_monthly_by_month() or None
-                    trailing = compute_trailing_risk_metrics(
+                    from datetime import date
+                    import calendar
+
+                    first_y, first_m = months_list[0]
+                    prev_y = first_y if first_m > 1 else first_y - 1
+                    prev_m = first_m - 1 if first_m > 1 else 12
+                    start_date = date(prev_y, prev_m, calendar.monthrange(prev_y, prev_m)[1])
+                    end_date = date(last_year, last_month, calendar.monthrange(last_year, last_month)[1])
+
+                    bench_daily = bench_nav_history
+                    if not bench_daily:
+                        bench_daily = _nifty_daily_series() or None
+
+                    daily = compute_risk_metrics_daily(
                         fund_nav_history=fund_nav_history,
-                        bench_nav_history=bench_nav_history or None,
-                        end_year=last_year,
-                        end_month=last_month,
-                        window=36,
-                        bench_monthly_by_month=nifty_by_month,
+                        bench_nav_history=bench_daily,
+                        start_date=start_date,
+                        end_date=end_date,
                     )
-                    if trailing and trailing.get("window_months", 0) >= 2:
-                        base["sharpe_ratio"] = round(trailing["sharpe_ratio"], 2)
-                        base["sortino_ratio"] = round(trailing["sortino_ratio"], 2)
-                        base["beta"] = round(trailing["beta"], 2)
-                        base["alpha"] = round(trailing["alpha"], 2)
-                        base["information_ratio"] = round(trailing["information_ratio"], 2)
-                        base["max_drawdown"] = round(trailing["max_drawdown"], 2)
-                        base["var_95"] = round(trailing["var_95"], 2)
-                        if trailing.get("std_dev_monthly") is not None:
-                            base["std_dev_annual"] = round(trailing["std_dev_monthly"] * (12 ** 0.5), 4)
-                        base["risk_window_months"] = trailing.get("window_months")
-                        print(f"[risk_metrics] Overlaid trailing ({trailing.get('window_months')}mo) risk figures")
+                    if daily and daily.get("obs_days", 0) >= 2:
+                        base["sharpe_ratio"] = round(daily["sharpe_ratio"], 2)
+                        base["sortino_ratio"] = round(daily["sortino_ratio"], 2)
+                        base["beta"] = round(daily["beta"], 2)
+                        base["alpha"] = round(daily["alpha"], 2)
+                        base["information_ratio"] = round(daily["information_ratio"], 2)
+                        base["max_drawdown"] = round(daily["max_drawdown"], 2)
+                        base["var_95"] = round(daily["var_95"], 2)
+                        base["correlation"] = daily.get("correlation")
+                        if daily.get("std_dev_monthly") is not None:
+                            base["std_dev_annual"] = round(daily["std_dev_monthly"] * (12 ** 0.5), 4)
+                        base["risk_obs_days"] = daily.get("obs_days")
+                        print(f"[risk_metrics] Overlaid daily ({daily.get('obs_days')} obs) risk figures")
                 except Exception as e:
-                    print(f"[risk_metrics] Trailing overlay failed: {e}")
+                    print(f"[risk_metrics] Daily overlay failed: {e}")
 
                 return base
             else:
@@ -172,30 +181,16 @@ def _load_nifty_df():
     return None
 
 
-def _nifty_monthly_by_month() -> dict:
-    """Return {(year, month): decimal_return} for every month the Nifty CSV
-    covers (only months where both the month-end and the prior month-end close
-    are present), for use as a market proxy in trailing risk metrics."""
+def _nifty_daily_series() -> list:
+    """Return the Nifty 50 close as a list of (date, close) tuples, for use as
+    a daily market proxy in risk metrics when no benchmark fund is selected."""
     df = _load_nifty_df()
     if df is None:
-        return {}
-    dser = pd.DatetimeIndex(df['Date'])
-
-    def _close_for(yy, mm):
-        sub = df[(dser.year == yy) & (dser.month == mm)]
-        if sub.empty:
-            return None
-        return float(sub.sort_values('Date').iloc[-1]['Close'])
-
-    out = {}
-    for ts in sorted(set((d.year, d.month) for d in dser)):
-        yy, mm = ts
-        py = yy if mm > 1 else yy - 1
-        pm = mm - 1 if mm > 1 else 12
-        c_e = _close_for(yy, mm)
-        c_s = _close_for(py, pm)
-        if c_e is not None and c_s is not None and c_s > 0:
-            out[(yy, mm)] = (c_e - c_s) / c_s
+        return []
+    out = []
+    for _, r in df.iterrows():
+        if pd.notna(r['Date']) and pd.notna(r['Close']):
+            out.append((pd.Timestamp(r['Date']).date(), float(r['Close'])))
     return out
 
 

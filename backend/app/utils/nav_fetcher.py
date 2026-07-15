@@ -569,6 +569,148 @@ def compute_risk_metrics_from_nav(
     return result
 
 
+# ── Daily-return Risk Metrics (analysis-period) ───────────────────────────────
+
+TRADING_DAYS_PER_YEAR = 252
+
+
+def compute_risk_metrics_daily(
+    fund_nav_history: list[tuple[date, float]],
+    bench_nav_history: list[tuple[date, float]] | None,
+    start_date: date,
+    end_date: date,
+    rf_rate: float = 0.065,
+) -> Optional[dict]:
+    """
+    Compute risk metrics from DAILY NAV returns over the analysis period
+    [start_date, end_date].
+
+    Using daily observations (rather than the handful of month-end points in
+    the report window) gives a statistically meaningful sample while still
+    describing the actual analysis period — so a period that contains a market
+    correction correctly shows a negative Sharpe, etc.
+
+    Fund-only metrics (Sharpe, Sortino, Std Dev, Max Drawdown, VaR) use the
+    fund's own daily series. Relative metrics (Beta, Jensen's Alpha,
+    Correlation, Information Ratio) use daily returns aligned on the dates both
+    fund and benchmark trade.
+
+    Returns are annualized with 252 trading days. `rf_rate` is the annual
+    risk-free rate.
+    """
+    if not fund_nav_history:
+        return None
+
+    fdict = {d: v for d, v in fund_nav_history if start_date <= d <= end_date and v and v > 0}
+    fdates = sorted(fdict)
+    if len(fdates) < 3:
+        return None
+
+    def _daily_rets(dts, dic):
+        return [(dic[dts[i]] - dic[dts[i - 1]]) / dic[dts[i - 1]] for i in range(1, len(dts))]
+
+    def _mean(a):
+        return sum(a) / len(a)
+
+    def _var_s(a):
+        m = _mean(a)
+        return sum((x - m) ** 2 for x in a) / (len(a) - 1)
+
+    def _std_s(a):
+        return math.sqrt(_var_s(a))
+
+    def _cov_s(a, b):
+        ma, mb = _mean(a), _mean(b)
+        return sum((a[i] - ma) * (b[i] - mb) for i in range(len(a))) / (len(a) - 1)
+
+    fund_r = _daily_rets(fdates, fdict)
+
+    result = {
+        "sharpe_ratio": 0.0,
+        "information_ratio": 0.0,
+        "beta": 1.0,
+        "alpha": 0.0,
+        "correlation": None,
+        "std_dev_monthly": None,
+        "sortino_ratio": 0.0,
+        "max_drawdown": 0.0,
+        "var_95": 0.0,
+        "obs_days": len(fund_r),
+    }
+
+    if len(fund_r) < 2:
+        return result
+
+    ann = TRADING_DAYS_PER_YEAR
+    sqrt_ann = math.sqrt(ann)
+    rf_daily = rf_rate / ann
+
+    # ── Fund-only metrics ─────────────────────────────────────────────────
+    mean_f = _mean(fund_r)
+    std_f = _std_s(fund_r)
+    fund_return_annual = mean_f * ann
+    std_dev_annual = std_f * sqrt_ann
+
+    sharpe = (fund_return_annual - rf_rate) / std_dev_annual if std_dev_annual > 1e-9 else 0.0
+
+    downside = [r - rf_daily for r in fund_r if (r - rf_daily) < 0]
+    if downside:
+        downside_dev = math.sqrt(sum(r * r for r in downside) / len(downside)) * sqrt_ann
+    else:
+        downside_dev = 0
+    sortino = ((mean_f - rf_daily) * ann) / downside_dev if downside_dev > 1e-9 else 0
+
+    nav = 100.0
+    peak = nav
+    max_dd = 0.0
+    for r in fund_r:
+        nav *= (1 + r)
+        if nav > peak:
+            peak = nav
+        dd = (nav - peak) / peak
+        if dd < max_dd:
+            max_dd = dd
+
+    srt = sorted(fund_r)
+    var_95 = -srt[int(0.05 * len(srt))] * 100 if srt else 0
+
+    result["sharpe_ratio"] = round(sharpe, 4)
+    result["sortino_ratio"] = round(sortino, 4)
+    result["max_drawdown"] = round(max_dd * 100, 4)
+    result["var_95"] = round(var_95, 4)
+    # Monthly std dev implied by daily volatility (~21 trading days/month)
+    result["std_dev_monthly"] = std_f * math.sqrt(21)
+
+    # ── Relative metrics (aligned daily series) ───────────────────────────
+    if bench_nav_history:
+        bdict = {d: v for d, v in bench_nav_history if start_date <= d <= end_date and v and v > 0}
+        common = sorted(set(fdict) & set(bdict))
+        if len(common) >= 3:
+            fr = _daily_rets(common, fdict)
+            br = _daily_rets(common, bdict)
+            var_b = _var_s(br)
+            cov = _cov_s(fr, br)
+            beta = cov / var_b if var_b > 1e-12 else 1.0
+            std_fr, std_br = _std_s(fr), _std_s(br)
+            corr = cov / (std_fr * std_br) if (std_fr > 1e-12 and std_br > 1e-12) else None
+
+            fr_ann = _mean(fr) * ann
+            mkt_ann = _mean(br) * ann
+            expected = rf_rate + beta * (mkt_ann - rf_rate)
+            alpha = (fr_ann - expected) * 100
+
+            active = [fr[i] - br[i] for i in range(len(fr))]
+            te = _std_s(active) * sqrt_ann
+            info_ratio = (fr_ann - mkt_ann) / te if te > 1e-9 else 0.0
+
+            result["beta"] = round(beta, 4)
+            result["alpha"] = round(alpha, 4)
+            result["correlation"] = round(corr, 4) if corr is not None else None
+            result["information_ratio"] = round(info_ratio, 4)
+
+    return result
+
+
 # ── Trailing-window Risk Metrics ──────────────────────────────────────────────
 
 def _trailing_months(end_year: int, end_month: int, window: int) -> list[tuple[int, int]]:
