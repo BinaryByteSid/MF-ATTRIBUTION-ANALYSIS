@@ -569,6 +569,171 @@ def compute_risk_metrics_from_nav(
     return result
 
 
+# ── Trailing-window Risk Metrics ──────────────────────────────────────────────
+
+def _trailing_months(end_year: int, end_month: int, window: int) -> list[tuple[int, int]]:
+    """Return the list of `window` (year, month) tuples ending at (end_year,
+    end_month), oldest first."""
+    out = []
+    y, m = end_year, end_month
+    for _ in range(window):
+        out.append((y, m))
+        m -= 1
+        if m < 1:
+            m = 12
+            y -= 1
+    return list(reversed(out))
+
+
+def compute_trailing_risk_metrics(
+    fund_nav_history: list[tuple[date, float]],
+    bench_nav_history: list[tuple[date, float]] | None,
+    end_year: int,
+    end_month: int,
+    window: int = 36,
+    bench_monthly_by_month: dict[tuple[int, int], float] | None = None,
+    rf_rate: float = 0.065,
+) -> Optional[dict]:
+    """
+    Compute risk metrics over a trailing `window`-month NAV window ending at
+    (end_year, end_month).
+
+    Risk metrics (Sharpe, Jensen's Alpha, Beta, Std Dev, ...) need a
+    statistically meaningful sample. Computing them from only the handful of
+    months shown in the report makes them dominated by short-term noise (e.g.
+    a single bad month) and annualization artefacts. This computes them from a
+    longer trailing history instead.
+
+    Fund-only metrics (Sharpe, Sortino, Std Dev, Max Drawdown, VaR) use every
+    month that has fund data. Relative metrics (Beta, Jensen's Alpha,
+    Information Ratio) use only the months where BOTH fund and benchmark data
+    exist, preserving month alignment between the two series.
+
+    `bench_monthly_by_month` is an optional {(year, month): decimal_return}
+    lookup used as the benchmark when no benchmark NAV history is supplied
+    (e.g. a Nifty index-return series).
+    """
+    if not fund_nav_history:
+        return None
+
+    months = _trailing_months(end_year, end_month, window)
+    fund_series = get_monthly_returns(fund_nav_history, months)  # aligned to `months`, None allowed
+
+    if bench_nav_history:
+        bench_series = get_monthly_returns(bench_nav_history, months)
+    elif bench_monthly_by_month:
+        bench_series = [bench_monthly_by_month.get(mm) for mm in months]
+    else:
+        bench_series = [None] * len(months)
+
+    fund_only = [r for r in fund_series if r is not None]
+    # Keep month alignment between fund and benchmark for relative metrics
+    joint = [
+        (f, b)
+        for f, b in zip(fund_series, bench_series)
+        if f is not None and b is not None
+    ]
+
+    result = {
+        "sharpe_ratio": 0.0,
+        "information_ratio": 0.0,
+        "beta": 1.0,
+        "alpha": 0.0,
+        "std_dev_monthly": None,
+        "sortino_ratio": 0.0,
+        "max_drawdown": 0.0,
+        "var_95": 0.0,
+        "window_months": len(fund_only),
+    }
+
+    n = len(fund_only)
+    if n < 2:
+        return result
+
+    def _mean(arr):
+        return sum(arr) / len(arr)
+
+    def _var_s(arr, m):
+        return sum((x - m) ** 2 for x in arr) / (len(arr) - 1)
+
+    def _std_s(arr, m):
+        return math.sqrt(_var_s(arr, m))
+
+    def _cov_s(a, ma, b, mb):
+        return sum((a[i] - ma) * (b[i] - mb) for i in range(len(a))) / (len(a) - 1)
+
+    rf_monthly = rf_rate / 12.0
+
+    # ── Fund-only metrics (full fund sample) ──────────────────────────────
+    mean_port = _mean(fund_only)
+    std_port = _std_s(fund_only, mean_port)
+    fund_return_annual = mean_port * 12
+    std_dev_annual = std_port * math.sqrt(12)
+
+    sharpe = (fund_return_annual - rf_rate) / std_dev_annual if std_dev_annual > 0.0001 else 0.0
+
+    excess_port = [r - rf_monthly for r in fund_only]
+    downside_diffs = [r for r in excess_port if r < 0]
+    if downside_diffs:
+        downside_deviation = math.sqrt(
+            sum(r * r for r in downside_diffs) / len(downside_diffs)
+        ) * math.sqrt(12)
+    else:
+        downside_deviation = 0
+    sortino = (_mean(excess_port) * 12) / downside_deviation if downside_deviation > 0.0001 else 0
+
+    current_nav = 100
+    nav_series = [current_nav]
+    for r in fund_only:
+        current_nav *= (1 + r)
+        nav_series.append(current_nav)
+    max_dd = 0
+    peak = nav_series[0]
+    for nav in nav_series:
+        if nav > peak:
+            peak = nav
+        dd = (nav - peak) / peak
+        if dd < max_dd:
+            max_dd = dd
+
+    sorted_returns = sorted(fund_only)
+    var_index = int(0.05 * len(sorted_returns))
+    var_95 = -sorted_returns[var_index] * 100 if sorted_returns else 0
+
+    result["sharpe_ratio"] = round(sharpe, 4)
+    result["std_dev_monthly"] = std_port
+    result["sortino_ratio"] = round(sortino, 4)
+    result["max_drawdown"] = round(max_dd * 100, 4)
+    result["var_95"] = round(var_95, 4)
+
+    # ── Relative metrics (aligned fund/benchmark sample) ──────────────────
+    if len(joint) >= 2:
+        jf = [x[0] for x in joint]
+        jb = [x[1] for x in joint]
+        mean_jf = _mean(jf)
+        mean_jb = _mean(jb)
+
+        var_bench = _var_s(jb, mean_jb)
+        cov_pb = _cov_s(jf, mean_jf, jb, mean_jb)
+        beta = cov_pb / var_bench if var_bench > 0.000001 else 1.0
+
+        jf_return_annual = mean_jf * 12
+        market_return_annual = mean_jb * 12
+        expected_return = rf_rate + beta * (market_return_annual - rf_rate)
+        alpha = (jf_return_annual - expected_return) * 100
+
+        active_returns = [jf[i] - jb[i] for i in range(len(joint))]
+        std_active = _std_s(active_returns, _mean(active_returns))
+        tracking_error = std_active * math.sqrt(12)
+        info_ratio = (jf_return_annual - market_return_annual) / tracking_error if tracking_error > 0.0001 else 0.0
+
+        result["beta"] = round(beta, 4)
+        result["alpha"] = round(alpha, 4)
+        result["information_ratio"] = round(info_ratio, 4)
+
+    return result
+
+
 # ── Category Rank (best-effort) ───────────────────────────────────────────────
 
 def get_category_rank(
@@ -658,13 +823,19 @@ def fetch_fund_and_bench_returns(
             bench_monthly = get_monthly_returns(bench_nav, months_list)
             result["bench_monthly_returns"] = [r for r in bench_monthly if r is not None]
 
-            valid_fund = result["fund_monthly_returns"]
-            valid_bench = result["bench_monthly_returns"]
-            min_len = min(len(valid_fund), len(valid_bench))
-            if min_len >= 2:
+            # Pair fund/benchmark by month and keep only months where BOTH have
+            # data, so the two series stay aligned. Filtering each series
+            # independently would shift the arrays relative to each other and
+            # corrupt beta / alpha / information ratio.
+            aligned = [
+                (f, b)
+                for f, b in zip(fund_monthly, bench_monthly)
+                if f is not None and b is not None
+            ]
+            if len(aligned) >= 2:
                 result["risk_metrics"] = compute_risk_metrics_from_nav(
-                    valid_fund[:min_len],
-                    valid_bench[:min_len],
+                    [f for f, _ in aligned],
+                    [b for _, b in aligned],
                 )
 
     return result

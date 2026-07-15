@@ -51,6 +51,7 @@ def compute_dashboard_risk_metrics(
         from app.utils.nav_fetcher import (
             fetch_fund_and_bench_returns,
             get_monthly_returns as nav_get_monthly_returns,
+            compute_trailing_risk_metrics,
             _get_nav_history_for_fund,
         )
 
@@ -95,11 +96,44 @@ def compute_dashboard_risk_metrics(
 
             if min_len >= 2:
                 print(f"[risk_metrics] Computing from {min_len} months of REAL NAV data")
-                return _compute_risk_from_returns(
+                base = _compute_risk_from_returns(
                     monthly_fund_returns,
                     monthly_bench_returns,
                     monthly_labels,
                 )
+
+                # Sharpe / Alpha / Beta etc. need a longer sample than the
+                # report window to be meaningful. Recompute them over a trailing
+                # window and overlay them, keeping the report-period
+                # monthly_returns list for the dashboard chart.
+                try:
+                    nifty_by_month = None
+                    if not bench_nav_history:
+                        nifty_by_month = _nifty_monthly_by_month() or None
+                    trailing = compute_trailing_risk_metrics(
+                        fund_nav_history=fund_nav_history,
+                        bench_nav_history=bench_nav_history or None,
+                        end_year=last_year,
+                        end_month=last_month,
+                        window=36,
+                        bench_monthly_by_month=nifty_by_month,
+                    )
+                    if trailing and trailing.get("window_months", 0) >= 2:
+                        base["sharpe_ratio"] = round(trailing["sharpe_ratio"], 2)
+                        base["sortino_ratio"] = round(trailing["sortino_ratio"], 2)
+                        base["beta"] = round(trailing["beta"], 2)
+                        base["alpha"] = round(trailing["alpha"], 2)
+                        base["information_ratio"] = round(trailing["information_ratio"], 2)
+                        base["max_drawdown"] = round(trailing["max_drawdown"], 2)
+                        base["var_95"] = round(trailing["var_95"], 2)
+                        if trailing.get("std_dev_monthly") is not None:
+                            base["std_dev_annual"] = round(trailing["std_dev_monthly"] * (12 ** 0.5), 4)
+                        base["risk_window_months"] = trailing.get("window_months")
+                        print(f"[risk_metrics] Overlaid trailing ({trailing.get('window_months')}mo) risk figures")
+                except Exception as e:
+                    print(f"[risk_metrics] Trailing overlay failed: {e}")
+
+                return base
             else:
                 print(f"[risk_metrics] Not enough real NAV data ({min_len} months), falling back")
         else:
@@ -115,6 +149,54 @@ def compute_dashboard_risk_metrics(
         months_list=months_list,
         bench_name=bench_name,
     )
+
+
+def _load_nifty_df():
+    """Load the Nifty 50 CSV as a sorted DataFrame, or None if unavailable."""
+    base_dir = Path(__file__).resolve().parents[3]
+    possible_dirs = [
+        Path(__file__).resolve().parent.parent / "templates",
+        base_dir / "FUNDS PERFORMANCE ANALYSIS",
+        base_dir,
+    ]
+    for d in possible_dirs:
+        candidate = d / "NIFTY50_2025-06-01_to_2026-06-01.csv"
+        if candidate.exists():
+            try:
+                df = pd.read_csv(str(candidate))
+                df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+                df = df.dropna(subset=['Date']).sort_values('Date').reset_index(drop=True)
+                return df
+            except Exception:
+                return None
+    return None
+
+
+def _nifty_monthly_by_month() -> dict:
+    """Return {(year, month): decimal_return} for every month the Nifty CSV
+    covers (only months where both the month-end and the prior month-end close
+    are present), for use as a market proxy in trailing risk metrics."""
+    df = _load_nifty_df()
+    if df is None:
+        return {}
+    dser = pd.DatetimeIndex(df['Date'])
+
+    def _close_for(yy, mm):
+        sub = df[(dser.year == yy) & (dser.month == mm)]
+        if sub.empty:
+            return None
+        return float(sub.sort_values('Date').iloc[-1]['Close'])
+
+    out = {}
+    for ts in sorted(set((d.year, d.month) for d in dser)):
+        yy, mm = ts
+        py = yy if mm > 1 else yy - 1
+        pm = mm - 1 if mm > 1 else 12
+        c_e = _close_for(yy, mm)
+        c_s = _close_for(py, pm)
+        if c_e is not None and c_s is not None and c_s > 0:
+            out[(yy, mm)] = (c_e - c_s) / c_s
+    return out
 
 
 def _compute_nifty_monthly_returns(months_list: list) -> list:

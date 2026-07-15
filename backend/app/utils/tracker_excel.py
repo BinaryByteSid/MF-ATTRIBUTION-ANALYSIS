@@ -12,6 +12,7 @@ try:
         compute_fund_returns as nav_compute_fund_returns,
         get_monthly_returns as nav_get_monthly_returns,
         compute_risk_metrics_from_nav,
+        compute_trailing_risk_metrics,
         _get_nav_history_for_fund,
         get_month_end_nav,
         get_performance_stats,
@@ -397,6 +398,8 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
     _nav_risk_metrics = None
     _nav_fund_nav_current = None
     _use_real_nav = False
+    fund_nav_history = []            # full NAV history (kept in function scope for
+    bench_nav_history = []           # trailing-window risk-metric computation below
 
     if NAV_FETCHER_AVAILABLE:
         try:
@@ -924,9 +927,15 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
             curr_stocks = {n for n in match_month[name_col].unique() if is_stock(n)}
             prev_stocks = {n for n in match_prev[name_col].unique() if is_stock(n)} if not match_prev.empty else set()
             
-            entries = curr_stocks - prev_stocks
-            exits = prev_stocks - curr_stocks
-            
+            # Entries/exits are only meaningful when we have the previous
+            # month's holdings to compare against. For the first month in the
+            # uploaded data `match_prev` is empty, which would otherwise flag
+            # EVERY current holding as a brand-new entry (making the largest
+            # holding look like the biggest "stock in"). Guard on match_prev.
+            has_prev = not match_prev.empty
+            entries = (curr_stocks - prev_stocks) if has_prev else set()
+            exits = (prev_stocks - curr_stocks) if has_prev else set()
+
             entry_stock, entry_wt, entry_sec = "-", "-", "-"
             if entries:
                 entry_rows = match_month[match_month[name_col].isin(entries)]
@@ -1521,6 +1530,61 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
             monthly_sheet_std_dev[sheet_name] = math.sqrt(_var)  # monthly std dev (decimal)
         else:
             monthly_sheet_std_dev[sheet_name] = None  # not enough data for 1 month
+
+    # ── Trailing-window risk metrics ─────────────────────────────────────────────
+    # Sharpe, Jensen's Alpha, Beta etc. require a statistically meaningful
+    # sample. The report's month range (often ~5 months) is far too short and
+    # yields noise-dominated values (a single bad month dominates, and
+    # annualization amplifies it), so compute these from a longer trailing NAV
+    # window ending at the last report month. The per-month/period RETURNS shown
+    # in the report are unaffected — only the risk matrix uses this window.
+    RISK_WINDOW_MONTHS = 36
+    if _use_real_nav and fund_nav_history:
+        try:
+            end_y, end_m = months_list[-1]
+
+            # Build a Nifty monthly-return lookup to use as the market proxy
+            # when no benchmark fund is selected. Only include months actually
+            # present in the Nifty CSV, to avoid injecting clamped/zero returns.
+            nifty_by_month: dict[tuple[int, int], float] = {}
+            if df_nifty is not None and not bench_nav_history:
+                _dser = pd.DatetimeIndex(df_nifty['Date'])
+
+                def _nifty_close_for(yy: int, mm: int):
+                    sub = df_nifty[(_dser.year == yy) & (_dser.month == mm)]
+                    if sub.empty:
+                        return None
+                    return float(sub.sort_values('Date').iloc[-1]['Close'])
+
+                wy, wm = end_y, end_m
+                for _ in range(RISK_WINDOW_MONTHS):
+                    py = wy if wm > 1 else wy - 1
+                    pm = wm - 1 if wm > 1 else 12
+                    c_e = _nifty_close_for(wy, wm)
+                    c_s = _nifty_close_for(py, pm)
+                    if c_e is not None and c_s is not None and c_s > 0:
+                        nifty_by_month[(wy, wm)] = (c_e - c_s) / c_s
+                    wy, wm = py, pm
+
+            trailing_rm = compute_trailing_risk_metrics(
+                fund_nav_history=fund_nav_history,
+                bench_nav_history=bench_nav_history,
+                end_year=end_y,
+                end_month=end_m,
+                window=RISK_WINDOW_MONTHS,
+                bench_monthly_by_month=nifty_by_month or None,
+            )
+            if trailing_rm and trailing_rm.get("window_months", 0) >= 2:
+                _nav_risk_metrics = trailing_rm
+                print(
+                    f"[tracker_excel] Trailing risk metrics over "
+                    f"{trailing_rm.get('window_months')} months: "
+                    f"Sharpe={trailing_rm['sharpe_ratio']}, "
+                    f"Alpha={trailing_rm['alpha']}, Beta={trailing_rm['beta']}, "
+                    f"IR={trailing_rm['information_ratio']}"
+                )
+        except Exception as e:
+            print(f"[tracker_excel] Trailing risk-metric computation failed: {e}")
 
     # ── Compute Diagnostics Risk Matrix ─────────────────────────────────────────
     # Prefer real NAV-based risk metrics, fall back to accumulated monthly returns
