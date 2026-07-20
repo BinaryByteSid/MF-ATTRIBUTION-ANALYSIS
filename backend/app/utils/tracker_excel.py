@@ -1822,7 +1822,8 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
         risk_beta=risk_beta,
         risk_alpha=risk_alpha,
         std_dev_annual=risk_std_dev_overall,
-        monthly_returns_labeled=risk_monthly_labeled
+        monthly_returns_labeled=risk_monthly_labeled,
+        risk_correlation=risk_correlation,
     )
 
     def write_attribution_table(start_row: int, title: str, data_dict: any) -> int:
@@ -2120,7 +2121,10 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
     sheet_cum["A84"] = round(_avg(cum_amc_aum), 2) if cum_amc_aum else "-"
 
     # ── Shift rows and write metadata on Cumulative Summary sheet ───────────────
-    extra_rows = 15 + (len(risk_monthly_labeled) if risk_monthly_labeled else 0)
+    # 16 base rows (15 metrics incl. correlation + 1 std dev) — must match the
+    # row count written by populate_vertical_metadata_table, or the content
+    # below the table gets overwritten by one row.
+    extra_rows = 16 + (len(risk_monthly_labeled) if risk_monthly_labeled else 0)
     sheet_cum.insert_rows(5, extra_rows)
 
     # Populate vertical metadata table in sheet_cum with averages
@@ -2142,7 +2146,8 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
         risk_beta=risk_beta,
         risk_alpha=risk_alpha,
         std_dev_annual=risk_std_dev_overall,
-        monthly_returns_labeled=risk_monthly_labeled
+        monthly_returns_labeled=risk_monthly_labeled,
+        risk_correlation=risk_correlation,
     )
 
     # Re-write fresh formulas at correctly shifted rows for returns
