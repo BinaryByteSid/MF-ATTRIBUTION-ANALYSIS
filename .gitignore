@@ -50,3 +50,7 @@ $RECYCLE.BIN/
 *.njsproj
 *.sln
 *.sw?
+
+# Stray nested repo + venv (broken submodule gitlink, no .gitmodules)
+# Its presence in the index made Render fail to clone the repo.
+FUNDS PERFORMANCE ANALYSIS/
