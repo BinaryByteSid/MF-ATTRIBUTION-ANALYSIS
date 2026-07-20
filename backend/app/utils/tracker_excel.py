@@ -64,98 +64,6 @@ def get_fund_seed(name: str) -> int:
         hash_val = hash_val - 0x100000000
     return abs(hash_val) % 100
 
-def get_underlying_stocks(category: str, seed: int):
-    # Standard stock pools matching the frontend
-    large_cap = [
-        ('HDFC Bank Ltd.', 'Financial Services', 9.8),
-        ('Reliance Industries Ltd.', 'Energy & Infrastructure', 9.2),
-        ('ICICI Bank Ltd.', 'Financial Services', 8.1),
-        ('Infosys Ltd.', 'Technology', 6.5),
-        ('Larsen & Toubro Ltd.', 'Construction/Capital Goods', 5.2),
-        ('Tata Consultancy Services Ltd.', 'Technology', 4.8),
-        ('ITC Ltd.', 'FMCG', 4.3),
-        ('Bharti Airtel Ltd.', 'Telecommunication', 4.1),
-        ('State Bank of India', 'Financial Services', 3.9),
-        ('Axis Bank Ltd.', 'Financial Services', 3.5),
-        ('Kotak Mahindra Bank Ltd.', 'Financial Services', 3.2),
-        ('Hindustan Unilever Ltd.', 'FMCG', 2.9),
-        ('Bajaj Finance Ltd.', 'Financial Services', 2.6),
-        ('Mahindra & Mahindra Ltd.', 'Automobile', 2.4),
-        ('Maruti Suzuki India Ltd.', 'Automobile', 2.1),
-        ('HCL Technologies Ltd.', 'Technology', 1.9),
-        ('Sun Pharmaceutical Industries Ltd.', 'Healthcare', 1.8),
-        ('Tata Motors Ltd.', 'Automobile', 1.7),
-        ('NTPC Ltd.', 'Utilities/Power', 1.6),
-        ('Power Grid Corporation of India Ltd.', 'Utilities/Power', 1.5)
-    ]
-
-    mid_cap = [
-        ('The Indian Hotels Co. Ltd.', 'Consumer Services', 4.8),
-        ('The Federal Bank Ltd.', 'Financial Services', 4.5),
-        ('Cummins India Ltd.', 'Capital Goods', 4.2),
-        ('Bharat Electronics Ltd.', 'Capital Goods/Defence', 4.0),
-        ('Ashok Leyland Ltd.', 'Automobile', 3.8),
-        ('Max Healthcare Institute Ltd.', 'Healthcare', 3.5),
-        ('Polycab India Ltd.', 'Capital Goods', 3.2),
-        ('Supreme Industries Ltd.', 'Capital Goods', 3.0),
-        ('Persistent Systems Ltd.', 'Technology', 2.8),
-        ('Astral Ltd.', 'Capital Goods', 2.6),
-        ('Voltas Ltd.', 'Capital Goods/Consumer Durables', 2.5),
-        ('MRF Ltd.', 'Automobile/Tires', 2.3),
-        ('Dalmia Bharat Ltd.', 'Materials', 2.2),
-        ('Escorts Kubota Ltd.', 'Automobile/Tractors', 2.1),
-        ('Coforge Ltd.', 'Technology', 2.0),
-        ('Lupin Ltd.', 'Healthcare', 1.9),
-        ('Apollo Tyres Ltd.', 'Automobile/Tires', 1.8),
-        ('Fortis Healthcare Ltd.', 'Healthcare', 1.7),
-        ('Page Industries Ltd.', 'Textiles', 1.6),
-        ('IDFC First Bank Ltd.', 'Financial Services', 1.5)
-    ]
-
-    small_cap = [
-        ('Kajaria Ceramics Ltd.', 'Consumer Durables', 3.8),
-        ('Cyient Ltd.', 'Technology', 3.5),
-        ('Sonata Software Ltd.', 'Technology', 3.2),
-        ('The Karur Vysya Bank Ltd.', 'Financial Services', 3.0),
-        ('Birla Corporation Ltd.', 'Materials/Cement', 2.8),
-        ('Blue Star Ltd.', 'Consumer Durables', 2.6),
-        ('Central Depository Services (India) Ltd.', 'Financial Services', 2.5),
-        ('Equitas Small Finance Bank Ltd.', 'Financial Services', 2.3),
-        ('Kirloskar Oil Engines Ltd.', 'Capital Goods', 2.2),
-        ('Elgi Equipments Ltd.', 'Capital Goods', 2.1),
-        ('Route Mobile Ltd.', 'Technology', 2.0),
-        ('Raymond Ltd.', 'Textiles/Apparel', 1.9),
-        ('JSW Energy Ltd.', 'Utilities/Power', 1.8),
-        ('CEAT Ltd.', 'Automobile/Tires', 1.7),
-        ('eClerx Services Ltd.', 'Technology', 1.6),
-        ('Greenpanel Industries Ltd.', 'Materials/Wood', 1.5),
-        ('Prince Pipes & Fittings Ltd.', 'Capital Goods', 1.4),
-        ('Radico Khaitan Ltd.', 'Beverages', 1.3),
-        ('Safexpress Private Ltd.', 'Services/Logistics', 1.2),
-        ('Orient Electric Ltd.', 'Consumer Durables', 1.1)
-    ]
-
-    cat_lower = category.lower()
-    if 'mid' in cat_lower:
-        base_pool = mid_cap
-    elif 'small' in cat_lower:
-        base_pool = small_cap
-    else:
-        base_pool = large_cap
-
-    # Rotate/adjust weights slightly based on seed to make it unique per fund
-    result = []
-    for i, (name, sector, allocation) in enumerate(base_pool):
-        adj_alloc = allocation * (0.8 + ((seed + i) % 5) * 0.1)
-        result.append((name, sector, adj_alloc))
-    
-    # Normalize weights to sum to 85% (leaving cash + others)
-    tot = sum(x[2] for x in result)
-    if tot > 0:
-        result = [(name, sector, round(alloc * 85.0 / tot, 4)) for (name, sector, alloc) in result]
-    
-    return sorted(result, key=lambda x: x[2], reverse=True)
-
 def get_sheet_name(year: int, month: int) -> str:
     month_names = {
         1: "Jan", 2: "Feb", 3: "Mar", 4: "Apr", 5: "May", 6: "Jun",
@@ -458,8 +366,6 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
             print(f"[tracker_excel] NAV fetch failed: {e}, falling back to seed-based data")
             _use_real_nav = False
 
-
-    is_hdfc = "hdfc flexi" in fund_name.lower() or isin.strip().upper() in ["INF179K011R0", "INF179K01608"]
 
     # Columns variables defaults
     isin_col = 'SD_Scheme ISIN'
@@ -962,77 +868,36 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
                     exit_wt = float(largest_exit[holding_col])  # type: ignore
                     exit_sec = str(largest_exit[sector_col])
             
-            # Target NAV & Flows
+            # Target NAV & Flows — derived from the uploaded holdings only.
             target_nav = None
             nifty_target_nav = None
-            if is_hdfc:
-                if year == 2025 and month == 12:
-                    target_nav = 1618.36
-                    nifty_target_nav = 26129.6
-                elif year == 2026 and month == 1:
-                    target_nav = 1596.93
-                    nifty_target_nav = 25320.65
-            
+
             if not match_prev.empty:
                 prev_aum = float(match_prev[aum_col].iloc[0])
                 flows = aum - prev_aum * (1 + fund_rets[4] / 100.0)
             else:
-                flows = round(2000.0 + (seed % 20) * 50 + (seed % 10) * 0.11, 4)
-                
-            if is_hdfc:
-                if year == 2025 and month == 12:
-                    flows = 2604.131283846509
-                elif year == 2026 and month == 1:
-                    flows = 2357.697223413823
+                # No prior month in the upload → net flows are not derivable.
+                flows = None
         else:
-            # Fallback mock data
-            cat_lower = category.lower()
-            if 'large' in cat_lower:
-                large_cap_wt = round(80.0 + (seed % 8), 4)
-                mid_cap_wt = round(8.0 + (seed % 4), 4)
-                small_cap_wt = round(2.0 + (seed % 3), 4)
-                cash_wt = round(10.0 - (seed % 5), 4)
-            elif 'mid' in cat_lower:
-                large_cap_wt = round(15.0 + (seed % 5), 4)
-                mid_cap_wt = round(70.0 + (seed % 8), 4)
-                small_cap_wt = round(8.0 + (seed % 4), 4)
-                cash_wt = round(7.0 - (seed % 3), 4)
-            elif 'small' in cat_lower:
-                large_cap_wt = round(5.0 + (seed % 3), 4)
-                mid_cap_wt = round(15.0 + (seed % 5), 4)
-                small_cap_wt = round(72.0 + (seed % 8), 4)
-                cash_wt = round(8.0 - (seed % 3), 4)
-            else: # Flexi Cap
-                large_cap_wt = round(70.0 + (seed % 4), 4)
-                mid_cap_wt = round(4.5 + (seed % 3) * 0.5, 4)
-                small_cap_wt = round(8.0 + (seed % 3) * 0.5, 4)
-                cash_wt = round(17.5 - large_cap_wt - mid_cap_wt - small_cap_wt, 4)
-                if cash_wt < 0:
-                    cash_wt = 5.0
-            others_wt = 0.0
-            num_stocks = 45 + (seed % 15)
-            
-            entry_stock_pool = [
-                ("Eternal Ltd.", "Consumer Cyclical", 0.3532),
-                ("Zomato Ltd.", "Consumer Services", 0.4521),
-                ("Tata Motors Ltd.", "Automobile", 0.512),
-                ("Angel One Ltd.", "Financial Services", 0.281)
-            ]
-            exit_stock_pool = [
-                ("Zee Entertainment Enterprises Ltd.", "Communication Services", 0.0616),
-                ("LTIMindtree Ltd.", "Technology", 0.125),
-                ("Gland Pharma Ltd.", "Healthcare", 0.087),
-                ("Marico Ltd.", "FMCG", 0.154)
-            ]
-            entry_idx = (seed + month) % len(entry_stock_pool)
-            exit_idx = (seed + month + 1) % len(exit_stock_pool)
-            
-            entry_stock, entry_wt, entry_sec = entry_stock_pool[entry_idx][0], entry_stock_pool[entry_idx][2], entry_stock_pool[entry_idx][1]
-            exit_stock, exit_wt, exit_sec = exit_stock_pool[exit_idx][0], exit_stock_pool[exit_idx][2], exit_stock_pool[exit_idx][1]
-            
-            target_nav = round(0.18 + (seed % 5) * 0.01 + 0.0011, 5)
-            nifty_target_nav = round(0.15 + (seed % 3) * 0.01 + 0.0023, 5)
-            flows = round(2000.0 + (seed % 20) * 50 + (seed % 10) * 0.11, 4)
+            # No holdings for this fund/month in the uploaded portfolio. Every
+            # figure below is derived from holdings, so leave them blank rather
+            # than inventing values — a blank cell is honest, a fabricated one
+            # silently misleads.
+            large_cap_wt = None
+            mid_cap_wt = None
+            small_cap_wt = None
+            cash_wt = None
+            others_wt = None
+            num_stocks = None
+
+            entry_stock, entry_wt, entry_sec = "-", "-", "-"
+            exit_stock, exit_wt, exit_sec = "-", "-", "-"
+
+            target_nav = None
+            nifty_target_nav = None
+            flows = None
+            print(f"[tracker_excel] No holdings for {fund_name} in {year}-{month:02d}; "
+                  f"portfolio-derived sections left blank")
 
         sheet["B15"] = large_cap_wt
         sheet["B16"] = mid_cap_wt
@@ -1085,41 +950,90 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
         cum_flows.append(flows)
 
         # 5. Underlying stocks for attribution
-        bench_weights = {
-            "HDFC Bank Ltd.": 12.30, "Reliance Industries Ltd.": 8.15, "ICICI Bank Ltd.": 7.80,
-            "Infosys Ltd.": 4.97, "Larsen & Toubro Ltd.": 3.99, "Tata Consultancy Services Ltd.": 2.76,
-            "ITC Ltd.": 2.68, "Bharti Airtel Ltd.": 4.74, "State Bank of India": 3.20,
-            "Axis Bank Ltd.": 3.40, "Kotak Mahindra Bank Ltd.": 2.90, "Hindustan Unilever Ltd.": 2.10,
-            "Bajaj Finance Ltd.": 1.95, "Mahindra & Mahindra Ltd.": 2.65, "Maruti Suzuki India Ltd.": 1.45,
-            "HCL Technologies Ltd.": 1.65, "Sun Pharmaceutical Industries Ltd.": 1.35,
-            "Tata Motors Ltd.": 1.25, "NTPC Ltd.": 1.10, "Power Grid Corporation of India Ltd.": 1.05
-        }
+        # Benchmark constituent weights come from the BENCHMARK SCHEME'S OWN
+        # holdings in the uploaded portfolio for this same month — never a
+        # hardcoded index list. Keyed by company ISIN where available (exact),
+        # falling back to the instrument name.
+        bench_weights: dict[str, float] = {}        # { stock_name: weight % }
+        bench_weights_by_isin: dict[str, float] = {}  # { company_isin: weight % }
+        bench_holdings_month = pd.DataFrame()
+        if df_port is not None and (bench_isin or bench_name):
+            _b_rows = df_port[df_port[isin_col] == bench_isin.strip().upper()] if bench_isin else pd.DataFrame()
+            if _b_rows.empty and bench_name:
+                _b_rows = df_port[df_port[scheme_name_col].str.lower().str.contains(
+                    bench_name.strip().lower(), regex=False, na=False)]
+            if not _b_rows.empty:
+                _b_month = _b_rows[_b_rows[month_col] == year * 100 + month]
+                if not _b_month.empty:
+                    bench_holdings_month = _b_month[~_b_month[name_col].astype(str).str.contains(
+                        'TREPS|Current Asset|GOI|Government|Bond', case=False, na=False)]
+                    for _, _brow in bench_holdings_month.iterrows():
+                        _bnm = str(_brow.get(name_col, '')).strip()
+                        try:
+                            _bwt = float(_brow[holding_col])
+                        except (TypeError, ValueError):
+                            continue
+                        if _bnm:
+                            bench_weights[_bnm] = bench_weights.get(_bnm, 0.0) + _bwt
+                        _bisin = _brow.get(company_isin_col)
+                        if pd.notna(_bisin) and str(_bisin).strip():
+                            _bk = str(_bisin).strip().upper()
+                            bench_weights_by_isin[_bk] = bench_weights_by_isin.get(_bk, 0.0) + _bwt
+        if not bench_weights and (bench_isin or bench_name):
+            print(f"[tracker_excel] No benchmark holdings for {bench_name or bench_isin} "
+                  f"in {year}-{month:02d}; benchmark weights will be blank")
 
         if not match_month.empty:
             port_stocks = match_month[~match_month[name_col].astype(str).str.contains('TREPS|Current Asset|GOI|Government|Bond', case=False, na=False)]
             port_stock_names = set(port_stocks[name_col].unique())
             all_stock_names = port_stock_names.union(set(bench_weights.keys()))
             
-            def get_bench_weight(stock_name: str) -> float:
+            def get_bench_weight(stock_name: str, stock_isin: str | None = None) -> float:
+                # 1. Exact match on company ISIN (most reliable)
+                if stock_isin:
+                    hit = bench_weights_by_isin.get(str(stock_isin).strip().upper())
+                    if hit is not None:
+                        return hit
+                # 2. Exact name match
+                if stock_name in bench_weights:
+                    return bench_weights[stock_name]
+                # 3. Substring name match (handles "Ltd"/"Ltd." style differences)
                 s_clean = stock_name.lower().strip()
                 for b_name, b_wt in bench_weights.items():
                     b_clean = b_name.lower().strip()
-                    if b_clean in s_clean or s_clean in b_clean:
+                    if b_clean and (b_clean in s_clean or s_clean in b_clean):
                         return b_wt
                 return 0.0
-                
+
             active_stocks = []
             for name in all_stock_names:
                 p_row = port_stocks[port_stocks[name_col] == name]
                 p_wt = float(p_row[holding_col].iloc[0]) if not p_row.empty else 0.0
-                
-                b_wt = get_bench_weight(name)
-                if b_wt == 0.0 and name in bench_weights:
-                    b_wt = bench_weights[name]
-                    
+
+                isin_for_bench = None
+                if not p_row.empty and pd.notna(p_row[company_isin_col].iloc[0]):
+                    isin_for_bench = str(p_row[company_isin_col].iloc[0]).strip().upper()
+                b_wt = get_bench_weight(name, isin_for_bench)
+
                 diff = abs(p_wt - b_wt)
-                ind = p_row[sector_col].iloc[0] if not p_row.empty else "Other"
-                isin_val = str(p_row[company_isin_col].iloc[0]).strip().upper() if (not p_row.empty and pd.notna(p_row[company_isin_col].iloc[0])) else None
+
+                # Industry / company ISIN: prefer the fund's own row; for stocks
+                # held ONLY by the benchmark (i.e. pure underweights), take them
+                # from the benchmark's holdings so the sector rollup and price
+                # lookup still work.
+                ind = "Other"
+                isin_val = None
+                if not p_row.empty:
+                    ind = p_row[sector_col].iloc[0]
+                    if pd.notna(p_row[company_isin_col].iloc[0]):
+                        isin_val = str(p_row[company_isin_col].iloc[0]).strip().upper()
+                elif not bench_holdings_month.empty:
+                    b_row = bench_holdings_month[bench_holdings_month[name_col] == name]
+                    if not b_row.empty:
+                        ind = b_row[sector_col].iloc[0]
+                        if pd.notna(b_row[company_isin_col].iloc[0]):
+                            isin_val = str(b_row[company_isin_col].iloc[0]).strip().upper()
+
                 active_stocks.append({
                     "name": name,
                     "isin": isin_val,
@@ -1128,7 +1042,25 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
                     "diff": diff,
                     "industry": ind
                 })
-                
+
+            # ── Real per-stock contribution ────────────────────────────────
+            # contribution (pp) = signed active weight (pp) × the stock's actual
+            # monthly return, looked up by company ISIN (then name) in
+            # All_stocks_monthly_prices.csv. Stocks with no price data get
+            # contribution None — the row is still shown, the cell left blank.
+            priced_n = 0
+            for item in active_stocks:
+                r = get_stock_monthly_return(item.get("isin"), item["name"], year, month)
+                item["ret"] = r
+                if r is None:
+                    item["contrib"] = None
+                else:
+                    priced_n += 1
+                    item["contrib"] = (item["p_wt"] - item["b_wt"]) * r
+            if active_stocks:
+                print(f"[tracker_excel] {sheet_name}: priced {priced_n}/{len(active_stocks)} "
+                      f"stocks for contribution")
+
             active_stocks_sorted = sorted(active_stocks, key=lambda x: x['diff'], reverse=True)
             top_active = active_stocks_sorted[:10]
             
@@ -1141,27 +1073,14 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
                 sheet[f"C{row_num}"] = b_wt_val if isinstance(b_wt_val, (int, float)) and b_wt_val > 0 else None
                 sheet[f"D{row_num}"] = f"=ABS(N(B{row_num})-N(C{row_num}))"
         else:
-            stocks = get_underlying_stocks(category, seed)
+            # No holdings uploaded for this fund/month — clear the Top 10 Active
+            # Weight block rather than filling it with placeholder stocks.
+            port_stocks = pd.DataFrame()
             active_stocks = []
-            for name, sector, p_weight in stocks:
-                b_weight = bench_weights.get(name, 0.0)
-                diff = round(p_weight - b_weight, 4)
-                active_stocks.append({
-                    "name": name,
-                    "p_wt": p_weight,
-                    "b_wt": b_weight,
-                    "diff": diff,
-                    "industry": sector
-                })
-            top_active = sorted(active_stocks, key=lambda x: x["p_wt"], reverse=True)[:10]
-            for idx, item in enumerate(top_active):
+            for idx in range(10):
                 row_num = 46 + idx
-                sheet[f"A{row_num}"] = item["name"]
-                p_wt_val = item["p_wt"]
-                b_wt_val = item["b_wt"]
-                sheet[f"B{row_num}"] = p_wt_val if isinstance(p_wt_val, (int, float)) and p_wt_val > 0 else None
-                sheet[f"C{row_num}"] = b_wt_val if isinstance(b_wt_val, (int, float)) and b_wt_val > 0 else None
-                sheet[f"D{row_num}"] = f"=B{row_num}-C{row_num}"
+                for col in ["A", "B", "C", "D"]:
+                    sheet[f"{col}{row_num}"] = None
         # ── Accumulate active_stocks into cross-month summary ──────────────────
         for item in active_stocks:
             sname = str(item["name"])
@@ -1191,30 +1110,24 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
                 return 'Consumer Cyclical'
             return 'Industrials'
 
+        # Portfolio sector weights — from the fund's own uploaded holdings,
+        # bucketed by each holding's declared industry.
         if not match_month.empty:
             for idx, row in port_stocks.iterrows():
-                sec = get_mapped_sector(row[sector_col])
+                sec = get_mapped_sector(str(row[sector_col]))
                 sector_weights[sec] = sector_weights.get(sec, 0.0) + float(row[holding_col])
-        else:
-            for name, sector, p_weight in stocks:
-                norm_sec = get_mapped_sector(sector)
-                sector_weights[norm_sec] = sector_weights.get(norm_sec, 0.0) + p_weight
 
-        # Benchmark sector weights mapping
+        # Benchmark sector weights — from the BENCHMARK's own uploaded holdings,
+        # bucketed by the same industry field (not a hardcoded index mapping).
         bench_sec_weights = {}
-        for name, b_wt in bench_weights.items():
-            b_sec = get_mapped_sector(name)
-            nifty_sec_map = {
-                "Reliance Industries Ltd.": "Energy", "NTPC Ltd.": "Energy", "Power Grid Corporation of India Ltd.": "Energy",
-                "Larsen & Toubro Ltd.": "Industrials",
-                "Infosys Ltd.": "Technology", "Tata Consultancy Services Ltd.": "Technology", "HCL Technologies Ltd.": "Technology", "Bharti Airtel Ltd.": "Technology",
-                "ITC Ltd.": "Consumer Cyclical", "Hindustan Unilever Ltd.": "Consumer Cyclical", "Mahindra & Mahindra Ltd.": "Consumer Cyclical", "Maruti Suzuki India Ltd.": "Consumer Cyclical", "Tata Motors Ltd.": "Consumer Cyclical",
-                "Sun Pharmaceutical Industries Ltd.": "Healthcare",
-                "JSW Steel Ltd.": "Basic Materials", "Tata Steel Ltd.": "Basic Materials"
-            }
-            if name in nifty_sec_map:
-                b_sec = nifty_sec_map[name]
-            bench_sec_weights[b_sec] = bench_sec_weights.get(b_sec, 0.0) + b_wt
+        if not bench_holdings_month.empty:
+            for _, brow in bench_holdings_month.iterrows():
+                try:
+                    b_wt_val = float(brow[holding_col])
+                except (TypeError, ValueError):
+                    continue
+                b_sec = get_mapped_sector(str(brow.get(sector_col, 'Other')))
+                bench_sec_weights[b_sec] = bench_sec_weights.get(b_sec, 0.0) + b_wt_val
 
         all_standard_sectors = ["Financial Services", "Technology", "Energy", "Basic Materials", "Healthcare", "Consumer Cyclical", "Industrials"]
         for sec in all_standard_sectors:
@@ -1226,19 +1139,25 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
                 sector_bench_weight_acc[sec] = []
             sector_bench_weight_acc[sec].append(bench_sec_weights[sec])
 
+        # Sector contribution = SUM of its constituent stocks' real
+        # contributions (bottom-up). This replaces the previous
+        # `diff × seed`-derived placeholder and makes the sector table
+        # reconcile exactly with the stock table.
+        sector_contrib_from_stocks: dict[str, float] = {}
+        for item in active_stocks:
+            if item.get("contrib") is None:
+                continue
+            sec_of_stock = get_mapped_sector(str(item.get("industry", "Other")))
+            sector_contrib_from_stocks[sec_of_stock] = (
+                sector_contrib_from_stocks.get(sec_of_stock, 0.0) + item["contrib"]
+            )
+
         sector_calls = []
         for sec in all_standard_sectors:
             p_w = sector_weights[sec]
             b_w = bench_sec_weights[sec]
             diff = round(p_w - b_w, 4)
-            contrib = round(diff * (0.01 + (seed % 5) * 0.005), 4)
-            if is_hdfc:
-                hdfc_contrib_map = {
-                    (2025, 12): {"Consumer Cyclical": 0.257754, "Healthcare": -0.25882, "Basic Materials": 0.199055, "Financial Services": -0.207216, "Technology": 0.096684, "Industrials": -0.172684},
-                    (2026, 1): {"Basic Materials": 0.273748, "Consumer Cyclical": -1.033679, "Financial Services": 0.224655, "Healthcare": -0.763615, "Energy": 0.188933, "Industrials": -0.253847}
-                }
-                if (year, month) in hdfc_contrib_map and sec in hdfc_contrib_map[(year, month)]:
-                    contrib = hdfc_contrib_map[(year, month)][sec]
+            contrib = round(sector_contrib_from_stocks.get(sec, 0.0), 6)
             sector_calls.append((sec, p_w, b_w, diff, contrib))
 
         # ── Accumulate sector contributions into cross-month summary ────────────
@@ -1337,64 +1256,33 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
             else:
                 sheet[f"H{row_num}"], sheet[f"I{row_num}"], sheet[f"J{row_num}"], sheet[f"K{row_num}"], sheet[f"L{row_num}"] = None, None, None, None, None
 
-        # Stock calls (top 10 contributing & detracting)
+        # Stock calls (top 10 contributing & detracting) — built entirely from
+        # the uploaded holdings, using the real contributions computed above.
         stock_calls = []
-        if not match_month.empty:
-            for item in active_stocks:
-                name = str(item["name"])
-                p_wt = float(item["p_wt"]) if item["p_wt"] is not None else 0.0
-                b_wt = float(item["b_wt"]) if item["b_wt"] is not None else 0.0
-                diff = p_wt - b_wt
-                
-                real_return = get_stock_monthly_return(item.get("isin"), name, year, month)
-                if real_return is not None:
-                    contrib = diff * real_return
-                else:
-                    contrib = diff * (0.02 + ((seed + ord(name[0])) % 8) * 0.006)
-                
-                change_str = "-"
-                if not match_prev.empty:
-                    c_row = match_month[match_month[name_col] == name]
-                    p_row = match_prev[match_prev[name_col] == name]
-                    if not c_row.empty and not p_row.empty:
+        for item in active_stocks:
+            name = str(item["name"])
+            p_wt = float(item["p_wt"]) if item["p_wt"] is not None else 0.0
+            b_wt = float(item["b_wt"]) if item["b_wt"] is not None else 0.0
+            diff = p_wt - b_wt
+            contrib = item.get("contrib")   # None when the stock had no price data
+
+            # Share-count change vs the previous month, from the upload
+            change_str = "-"
+            if not match_prev.empty and not match_month.empty:
+                c_row = match_month[match_month[name_col] == name]
+                p_row_prev = match_prev[match_prev[name_col] == name]
+                if not c_row.empty and not p_row_prev.empty:
+                    try:
                         c_shares = float(c_row[shares_col].iloc[0])
-                        p_shares = float(p_row[shares_col].iloc[0])
+                        p_shares = float(p_row_prev[shares_col].iloc[0])
                         if c_shares > p_shares:
                             change_str = "Added"
                         elif c_shares < p_shares:
                             change_str = "Reduced"
-                            
-                if is_hdfc:
-                    hdfc_stock_contrib_map = {
-                        (2025, 12): {
-                            "Maruti Suzuki India Ltd": 0.191077, "Kotak Mahindra Bank Ltd": 0.167335, "SBI Life Insurance Co Ltd": 0.159252, "Tata Steel Ltd": 0.116228, "Eicher Motors Ltd": 0.099351, "Bajaj Auto Ltd": 0.064252, "Infosys Ltd": 0.059661, "Hindalco Industries Ltd": 0.056316, "Ashok Leyland Ltd": 0.051472, "Bank of Baroda": 0.037394,
-                            "ICICI Bank Ltd": None, "InterGlobe Aviation Ltd": None, "Piramal Pharma Ltd": None, "HDFC Bank Ltd": None, "Nexus Select Trust Reits": None, "Varroc Engineering Ltd Ordinary Shares": None, "Axis Bank Ltd": None, "Power Grid Corp Of India Ltd": None, "Cipla Ltd": None, "Hyundai Motor India Ltd": None
-                        },
-                        (2026, 1): {
-                            "Axis Bank Ltd": 0.656359, "State Bank of India": 0.499777, "Oil & Natural Gas Corp Ltd": 0.188933, "HCL Technologies Ltd": 0.181485, "Tata Steel Ltd": 0.124890, "ICICI Bank Ltd": 0.092639, "JSW Steel Ltd": 0.082207, "Bajaj Auto Ltd": 0.059740, "Hindalco Industries Ltd": 0.054478, "Ashok Leyland Ltd": 0.043305,
-                            "HDFC Bank Ltd": -0.607692, "Maruti Suzuki India Ltd": -0.501954, "Cipla Ltd": -0.469773, "Kotak Mahindra Bank Ltd": -0.350748, "Piramal Pharma Ltd": -0.191004, "Bharti Airtel Ltd": -0.180146, "Sapphire Foods India Ltd": -0.163100, "InterGlobe Aviation Ltd": -0.110774, "Hyundai Motor India Ltd": -0.109602, "FSN E-Commerce Ventures Ltd": -0.103202
-                        }
-                    }
-                    if (year, month) in hdfc_stock_contrib_map and name in hdfc_stock_contrib_map[(year, month)]:
-                        contrib = hdfc_stock_contrib_map[(year, month)][name]
-                
-                stock_calls.append((name, p_wt, b_wt, diff, contrib, change_str))
-        else:
-            for item in active_stocks:
-                name = str(item["name"])
-                p_w = float(item["p_wt"]) if item["p_wt"] is not None else 0.0
-                b_w = float(item["b_wt"]) if item["b_wt"] is not None else 0.0
-                diff = float(item["diff"]) if item["diff"] is not None else 0.0
-                
-                real_return = get_stock_monthly_return(None, name, year, month)
-                if real_return is not None:
-                    contrib = diff * real_return
-                else:
-                    contrib = round(diff * (0.02 + ((seed + ord(name[0])) % 8) * 0.006), 4)
-                
-                change_shares = (seed + len(name) + month) % 3 - 1
-                change_str = "-" if change_shares == 0 else ("Added" if change_shares > 0 else "Reduced")
-                stock_calls.append((name, p_w, b_w, diff, contrib, change_str))
+                    except (TypeError, ValueError):
+                        pass
+
+            stock_calls.append((name, p_wt, b_wt, diff, contrib, change_str))
 
         # ── Accumulate stock contributions into cross-month summary ─────────────
         for sc in stock_calls:
@@ -1442,17 +1330,16 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
                 sheet[f"H{row_num}"], sheet[f"I{row_num}"], sheet[f"J{row_num}"], sheet[f"K{row_num}"], sheet[f"L{row_num}"], sheet[f"M{row_num}"] = None, None, None, None, None, None
 
         # AR Ownership (Rows 81 and 84)
-        ar_aum_scheme = round(flows * 1.5 + (seed % 100), 2)
-        ar_aum_amc = round(ar_aum_scheme * 1.6 + (seed % 50), 2)
-        amc_aum = round(aum * 4.5 + (seed % 1000), 2)
+        # AR AUM / AMC AUM are not present in a holdings file and cannot be
+        # derived from it, so leave them blank instead of deriving a number
+        # from the fund-name hash. Scheme AUM (A81) still comes from the upload.
+        ar_aum_scheme = None
+        ar_aum_amc = None
+        amc_aum = None
 
         sheet["B81"] = ar_aum_scheme
         sheet["B84"] = ar_aum_amc
         sheet["A84"] = amc_aum
-
-        cum_ar_aum_scheme.append(ar_aum_scheme)
-        cum_ar_aum_amc.append(ar_aum_amc)
-        cum_amc_aum.append(amc_aum)
 
         # ── Brinson Attribution Calculations (1 Month) ──
         r_b_total = nifty_rets[4] / 100.0  # in decimal
@@ -1468,7 +1355,7 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
             p_weights[sec] = sector_weights.get(sec, 0.0) / 100.0
             b_weights[sec] = bench_sec_weights.get(sec, 0.0) / 100.0
             
-        p_weights["Cash"] = cash_wt / 100.0
+        p_weights["Cash"] = (cash_wt / 100.0) if cash_wt is not None else 0.0
         b_weights["Cash"] = 0.0
         all_sectors.append("Cash")
         
@@ -1942,7 +1829,15 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
     n_months = len(months_list)
 
     def _avg(lst):
-        return sum(lst) / len(lst) if lst else 0.0
+        # Skip months with no uploaded holdings (None) rather than treating
+        # them as zero, which would drag the average down.
+        vals = [x for x in (lst or []) if x is not None]
+        return sum(vals) / len(vals) if vals else None
+
+    def _ravg(lst, digits=2):
+        """Average then round, yielding None when nothing is averageable."""
+        v = _avg(lst)
+        return round(v, digits) if v is not None else None
 
     def _avg_list(lists, idx):
         vals = [l[idx] for l in lists if idx < len(l)]
@@ -1973,12 +1868,12 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
         sheet_cum[f"I{row_num}"] = "-"
 
     # ── Rows 15-22: Portfolio Details (averages) ─────────────────────────────────
-    sheet_cum["B15"] = round(_avg(cum_large_cap), 2)
-    sheet_cum["B16"] = round(_avg(cum_mid_cap), 2)
-    sheet_cum["B17"] = round(_avg(cum_small_cap), 2)
-    sheet_cum["B18"] = round(_avg(cum_others_cap), 2)
-    sheet_cum["B19"] = round(_avg(cum_cash), 2)
-    sheet_cum["B22"] = round(_avg(cum_num_stocks))
+    sheet_cum["B15"] = _ravg(cum_large_cap)
+    sheet_cum["B16"] = _ravg(cum_mid_cap)
+    sheet_cum["B17"] = _ravg(cum_small_cap)
+    sheet_cum["B18"] = _ravg(cum_others_cap)
+    sheet_cum["B19"] = _ravg(cum_cash)
+    sheet_cum["B22"] = _ravg(cum_num_stocks, 0)
 
     # ── Rows 27: Entry/Exit stocks ──────────────────────────────────────────────
     if all_period_entries:
@@ -2002,9 +1897,9 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
         sheet_cum["G27"] = "-"
 
     # ── Rows 34-42: NAV, flows (averages) ────────────────────────────────────────
-    sheet_cum["B34"] = round(_avg(cum_target_nav), 5) if cum_target_nav else "-"
-    sheet_cum["B35"] = round(_avg(cum_nifty_target_nav), 5) if cum_nifty_target_nav else "-"
-    sheet_cum["B42"] = round(_avg(cum_flows), 2)
+    sheet_cum["B34"] = _ravg(cum_target_nav, 5)
+    sheet_cum["B35"] = _ravg(cum_nifty_target_nav, 5)
+    sheet_cum["B42"] = _ravg(cum_flows)
 
     # ── Rows 46-55: Top 10 Stocks by Active Weight (cumulative averages) ─────────
     avg_stocks_all = []
@@ -2116,9 +2011,9 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
                 sheet_cum[f"{col_l}{row_num}"] = None
 
     # ── Rows 81-84: AR Ownership (averages) ──────────────────────────────────────
-    sheet_cum["B81"] = round(_avg(cum_ar_aum_scheme), 2) if cum_ar_aum_scheme else "-"
-    sheet_cum["B84"] = round(_avg(cum_ar_aum_amc), 2) if cum_ar_aum_amc else "-"
-    sheet_cum["A84"] = round(_avg(cum_amc_aum), 2) if cum_amc_aum else "-"
+    sheet_cum["B81"] = _ravg(cum_ar_aum_scheme)
+    sheet_cum["B84"] = _ravg(cum_ar_aum_amc)
+    sheet_cum["A84"] = _ravg(cum_amc_aum)
 
     # ── Shift rows and write metadata on Cumulative Summary sheet ───────────────
     # 16 base rows (15 metrics incl. correlation + 1 std dev) — must match the
@@ -2133,12 +2028,12 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
         fund_name=fund_name,
         isin=isin,
         aum_label=f"{n_months}m avg",
-        aum=round(_avg(cum_aum), 2),
+        aum=_ravg(cum_aum),
         exr=exr,
         manager=manager,
         bench_name=bench_name,
         bench_isin=bench_isin,
-        bench_aum=round(_avg(cum_bench_aum), 2) if (bench_name and cum_bench_aum) else None,
+        bench_aum=_ravg(cum_bench_aum) if bench_name else None,
         bench_exr=bench_exr if bench_name else None,
         bench_manager=bench_manager if bench_manager else "Benchmark Mgr.",
         risk_sharpe=risk_sharpe,
