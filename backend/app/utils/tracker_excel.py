@@ -1640,22 +1640,23 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
                 if ws[f"A{r}"].value:
                     ws[f"D{r}"] = f"=ABS(N(B{r})-N(C{r}))"
                     
+            # Only rewrite the difference formulas. The benchmark-weight columns
+            # (C / J) already hold real weights taken from the benchmark's own
+            # uploaded holdings — they must NOT be overwritten with VLOOKUPs into
+            # 'Highlights'/'Attribution', which are sheets that do not exist in
+            # this workbook and so resolved to #REF!, wiping the real values.
             for idx_s in range(3):
                 r = 61 + formula_offset + idx_s
                 if ws[f"A{r}"].value:
-                    ws[f"C{r}"] = f"=VLOOKUP(A{r},Highlights!$A$10:$E$20,5,0)"
-                    ws[f"D{r}"] = f"=B{r}-C{r}"
+                    ws[f"D{r}"] = f"=N(B{r})-N(C{r})"
                 if ws[f"H{r}"].value:
-                    ws[f"J{r}"] = f"=VLOOKUP(H{r},Highlights!$A$10:$E$20,5,0)"
-                    ws[f"K{r}"] = f"=I{r}-J{r}"
-                    
+                    ws[f"K{r}"] = f"=N(I{r})-N(J{r})"
+
             for idx_s in range(10):
                 r = 67 + formula_offset + idx_s
                 if ws[f"A{r}"].value:
-                    ws[f"C{r}"] = f"=VLOOKUP(A{r},Attribution!$B$11:$G$1048576,6,0)"
                     ws[f"D{r}"] = f"=N(B{r})-N(C{r})"
                 if ws[f"H{r}"].value:
-                    ws[f"J{r}"] = f"=VLOOKUP(H{r},Attribution!$B$11:$G$1048576,6,0)"
                     ws[f"K{r}"] = f"=N(I{r})-N(J{r})"
                     
             r81 = 81 + formula_offset
@@ -2057,22 +2058,20 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
         if sheet_cum[f"A{r}"].value:
             sheet_cum[f"D{r}"] = f"=ABS(N(B{r})-N(C{r}))"
             
+    # As on the monthly sheets: keep the real benchmark weights in C / J and
+    # only rewrite the difference formulas.
     for idx_s in range(3):
         r = 61 + extra_rows + idx_s
         if sheet_cum[f"A{r}"].value:
-            sheet_cum[f"C{r}"] = f"=VLOOKUP(A{r},Highlights!$A$10:$E$20,5,0)"
-            sheet_cum[f"D{r}"] = f"=B{r}-C{r}"
+            sheet_cum[f"D{r}"] = f"=N(B{r})-N(C{r})"
         if sheet_cum[f"H{r}"].value:
-            sheet_cum[f"J{r}"] = f"=VLOOKUP(H{r},Highlights!$A$10:$E$20,5,0)"
-            sheet_cum[f"K{r}"] = f"=I{r}-J{r}"
-            
+            sheet_cum[f"K{r}"] = f"=N(I{r})-N(J{r})"
+
     for idx_s in range(10):
         r = 67 + extra_rows + idx_s
         if sheet_cum[f"A{r}"].value:
-            sheet_cum[f"C{r}"] = f"=VLOOKUP(A{r},Attribution!$B$11:$G$1048576,6,0)"
             sheet_cum[f"D{r}"] = f"=N(B{r})-N(C{r})"
         if sheet_cum[f"H{r}"].value:
-            sheet_cum[f"J{r}"] = f"=VLOOKUP(H{r},Attribution!$B$11:$G$1048576,6,0)"
             sheet_cum[f"K{r}"] = f"=N(I{r})-N(J{r})"
             
     r81 = 81 + extra_rows
