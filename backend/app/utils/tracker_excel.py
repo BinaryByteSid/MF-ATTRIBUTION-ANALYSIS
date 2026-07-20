@@ -1095,20 +1095,68 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
 
         sector_weights = {}
         def get_mapped_sector(ind: str) -> str:
-            s = ind.lower()
-            if 'bank' in s or 'finance' in s or 'nbfc' in s or 'insurance' in s or 'investment' in s:
-                return 'Financial Services'
-            if 'it -' in s or 'software' in s or 'tech' in s or 'internet' in s:
-                return 'Technology'
-            if 'refineries' in s or 'power' in s or 'electric' in s or 'utilities' in s or 'gas' in s or 'oil' in s:
-                return 'Energy'
-            if 'chemical' in s or 'steel' in s or 'iron' in s or 'basic materials' in s or 'cement' in s or 'metal' in s or 'paints' in s:
-                return 'Basic Materials'
-            if 'hospital' in s or 'healthcare' in s or 'pharmaceutical' in s or 'drug' in s:
+            """Map a raw holding industry to a standard sector bucket.
+
+            Rule ORDER matters — earlier rules win, which is how keyword
+            collisions are resolved:
+              * Healthcare before Technology  → 'biotechnology' is not 'tech'
+              * Financial before Technology   → 'fintech' is not 'tech'
+              * Financial before Real Estate  → 'housing finance' is not realty
+              * Utilities before Energy       → 'power' is not oil & gas
+            Anything unrecognised returns 'Other' rather than silently
+            inflating Industrials (which is what previously swallowed FMCG,
+            telecom, media and consumer services).
+            """
+            s = str(ind).lower()
+
+            if any(k in s for k in ('hospital', 'healthcare', 'health care', 'pharmaceutic',
+                                    'pharma', 'drug', 'biotech', 'medical', 'diagnostic',
+                                    'life science')):
                 return 'Healthcare'
-            if 'automobile' in s or 'auto' in s or 'consumer durables' in s or 'tea/coffee' in s or 'cyclical' in s or 'retail' in s or 'hotel' in s or 'leisure' in s or 'textile' in s or 'apparel' in s or 'brewery' in s or 'distilleries' in s or 'beverage' in s:
+            if any(k in s for k in ('bank', 'finance', 'financial', 'fintech', 'nbfc',
+                                    'insurance', 'investment', 'broking', 'broker',
+                                    'asset management', 'capital market', 'depositor',
+                                    'exchange')):
+                return 'Financial Services'
+            if any(k in s for k in ('real estate', 'realty', 'reit')):
+                return 'Real Estate'
+            if any(k in s for k in ('telecom', 'media', 'entertainment', 'broadcast',
+                                    'publish', 'advertis', 'communication')):
+                return 'Communication Services'
+            if any(k in s for k in ('utilit', 'power', 'electric')):
+                return 'Utilities'
+            # Edible/vegetable oils are food, not crude — must precede the
+            # Energy rule, which would otherwise match on 'oil'.
+            if any(k in s for k in ('edible oil', 'vegetable oil', 'palm oil', 'cooking oil')):
+                return 'Consumer Defensive'
+            if any(k in s for k in ('oil', 'gas', 'refiner', 'petroleum', 'coal', 'energy')):
+                return 'Energy'
+            if any(k in s for k in ('chemical', 'steel', 'iron', 'basic material', 'cement',
+                                    'metal', 'paint', 'mining', 'mineral', 'fertiliser',
+                                    'fertilizer', 'aluminium', 'aluminum', 'copper', 'zinc',
+                                    'paper', 'wood')):
+                return 'Basic Materials'
+            if any(k in s for k in ('it -', 'software', 'technolog', 'internet', 'computer',
+                                    'semiconductor', 'hardware', 'it services', 'data process')):
+                return 'Technology'
+            if any(k in s for k in ('fmcg', 'tobacco', 'cigarette', 'food', 'beverage',
+                                    'brewer', 'distiller', 'sugar', 'tea', 'coffee', 'edible',
+                                    'agri', 'personal product', 'personal care', 'household',
+                                    'staple', 'dairy', 'consumer non')):
+                return 'Consumer Defensive'
+            if any(k in s for k in ('automobile', 'auto', 'tyre', 'tire', 'consumer durable',
+                                    'durables', 'retail', 'hotel', 'leisure', 'restaurant',
+                                    'apparel', 'textile', 'footwear', 'jewel', 'gems',
+                                    'e-commerce', 'ecommerce', 'travel', 'education',
+                                    'cyclical', 'consumer service')):
                 return 'Consumer Cyclical'
-            return 'Industrials'
+            if any(k in s for k in ('construction', 'infrastructure', 'engineering',
+                                    'capital good', 'defence', 'defense', 'aerospace',
+                                    'logistic', 'transport', 'shipping', 'airline',
+                                    'aviation', 'machinery', 'industrial', 'conglomerate',
+                                    'trading', 'diversified', 'cable', 'abrasive')):
+                return 'Industrials'
+            return 'Other'
 
         # Portfolio sector weights — from the fund's own uploaded holdings,
         # bucketed by each holding's declared industry.
@@ -1129,7 +1177,12 @@ def generate_monthly_tracker_excel(isin: str, fund_name: str, template_path: str
                 b_sec = get_mapped_sector(str(brow.get(sector_col, 'Other')))
                 bench_sec_weights[b_sec] = bench_sec_weights.get(b_sec, 0.0) + b_wt_val
 
-        all_standard_sectors = ["Financial Services", "Technology", "Energy", "Basic Materials", "Healthcare", "Consumer Cyclical", "Industrials"]
+        all_standard_sectors = [
+            "Financial Services", "Technology", "Energy", "Utilities",
+            "Basic Materials", "Healthcare", "Consumer Cyclical",
+            "Consumer Defensive", "Communication Services", "Real Estate",
+            "Industrials", "Other",
+        ]
         for sec in all_standard_sectors:
             if sec not in sector_weights:
                 sector_weights[sec] = 0.0
