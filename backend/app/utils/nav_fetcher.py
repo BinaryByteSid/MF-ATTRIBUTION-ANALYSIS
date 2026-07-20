@@ -601,7 +601,21 @@ def compute_risk_metrics_daily(
     if not fund_nav_history:
         return None
 
-    fdict = {d: v for d, v in fund_nav_history if start_date <= d <= end_date and v and v > 0}
+    def _window(hist):
+        """NAVs for the period: the last trading day on/before start_date as the
+        anchor (so the first return spans the true period start even when
+        start_date falls on a weekend/holiday), plus every day up to end_date."""
+        pts = sorted((d, v) for d, v in hist if v and v > 0)
+        anchor = None
+        window = []
+        for d, v in pts:
+            if d <= start_date:
+                anchor = (d, v)          # keep the latest point on/before the start
+            elif d <= end_date:
+                window.append((d, v))
+        return dict(([anchor] if anchor else []) + window)
+
+    fdict = _window(fund_nav_history)
     fdates = sorted(fdict)
     if len(fdates) < 3:
         return None
@@ -683,7 +697,7 @@ def compute_risk_metrics_daily(
 
     # ── Relative metrics (aligned daily series) ───────────────────────────
     if bench_nav_history:
-        bdict = {d: v for d, v in bench_nav_history if start_date <= d <= end_date and v and v > 0}
+        bdict = _window(bench_nav_history)
         common = sorted(set(fdict) & set(bdict))
         if len(common) >= 3:
             fr = _daily_rets(common, fdict)
