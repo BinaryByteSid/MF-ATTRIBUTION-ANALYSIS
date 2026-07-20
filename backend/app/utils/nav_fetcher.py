@@ -12,6 +12,7 @@ Provides:
 
 import math
 import re
+import time as time_module
 from datetime import date, datetime, timedelta
 from functools import lru_cache
 from typing import Optional
@@ -1203,6 +1204,17 @@ def find_matching_perf_row(nav_name: str, perf_rows: list) -> dict | None:
 
 _perf_api_cache = {}
 
+# Circuit breaker for the AMFI performance endpoint.
+# The cache key includes the report date, so a multi-month report makes one
+# call per month. When AMFI is slow or unreachable each of those burns the
+# full retry budget, which pushed report generation past both the frontend's
+# 120s abort and the server's own 120s timeout ("Failed to fetch" in the UI).
+# The stats are optional — they only fill category returns and rank — so once
+# the endpoint fails we stop calling it for a cooldown and let the report
+# finish without them.
+_perf_api_down_until: float = 0.0
+_PERF_API_COOLDOWN_SEC = 300
+
 def get_performance_stats(fund_name: str, category: str, date_str: str, is_direct: bool = False) -> dict | None:
     """
     Fetch performance stats (AUM, category returns, and ranks) for a given fund and category on a specific date.
@@ -1216,12 +1228,19 @@ def get_performance_stats(fund_name: str, category: str, date_str: str, is_direc
     Returns:
         Dict with keys: fund_aum, category_returns, ranks or None.
     """
+    global _perf_api_down_until
+
     maturity_id, cat_id, sub_id = map_section_to_ids(category)
     key = (date_str, maturity_id, cat_id, sub_id)
     
     # 1. Check in cache
     if key in _perf_api_cache:
         rows = _perf_api_cache[key]
+    elif time_module.time() < _perf_api_down_until:
+        # Endpoint recently failed — skip immediately rather than paying the
+        # retry budget again on every remaining month of the report.
+        _perf_api_cache[key] = []
+        return None
     else:
         url = "https://www.amfiindia.com/gateway/pollingsebi/api/amfi/fundperformance"
         headers = {
@@ -1236,14 +1255,16 @@ def get_performance_stats(fund_name: str, category: str, date_str: str, is_direc
             "reportDate": date_str
         }
         
+        # Fail fast: 2 attempts at an 8s timeout caps this at ~17s per month
+        # instead of ~45s, keeping the whole report inside the request budget.
         import time
-        max_retries = 3
+        max_retries = 2
         backoff = 0.5
         rows = []
-        
+
         for attempt in range(max_retries):
             try:
-                resp = requests.post(url, json=payload, headers=headers, timeout=15)
+                resp = requests.post(url, json=payload, headers=headers, timeout=8)
                 if resp.status_code == 200:
                     res_data = resp.json()
                     if res_data.get("validationMsg") == "SUCCESS":
@@ -1257,6 +1278,10 @@ def get_performance_stats(fund_name: str, category: str, date_str: str, is_direc
                 backoff *= 2
                 
         if not rows:
+            # Trip the breaker so the remaining months skip this call entirely.
+            _perf_api_down_until = time_module.time() + _PERF_API_COOLDOWN_SEC
+            print(f"[nav_fetcher] AMFI performance endpoint unavailable; "
+                  f"skipping it for {_PERF_API_COOLDOWN_SEC}s (category stats omitted)")
             _perf_api_cache[key] = []
             return None
 
