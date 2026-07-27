@@ -1363,6 +1363,10 @@ export const AttributionDashboard: React.FC = () => {
   const [reportFormat, setReportFormat] = useState<'pdf' | 'xlsx'>('pdf');
   const [reportFromDate, setReportFromDate] = useState<string>('2025-12-01');
   const [reportToDate, setReportToDate] = useState<string>('2026-04-30');
+  // Holdings file attached specifically for the Monthly Tracker report. Setting
+  // it populates the shared `uploadedFile` that handleDownloadExcel POSTs, so
+  // the stock/sector/entry-exit sections can be built from real holdings.
+  const [reportHoldingsName, setReportHoldingsName] = useState<string>('');
   const [dashboardFromDate, setDashboardFromDate] = useState<string>('2025-12-01');
   const [dashboardToDate, setDashboardToDate] = useState<string>('2026-04-30');
 
@@ -2063,6 +2067,15 @@ export const AttributionDashboard: React.FC = () => {
     });
     return list.sort((a, b) => a.name.localeCompare(b.name));
   }, [expenseManagerMap]);
+
+  // Attach a holdings file for the report only — just capture the raw file to
+  // POST; no dashboard-side parsing (that's handleFileUpload's job).
+  const handleReportHoldingsUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadedFile(file);
+    setReportHoldingsName(file.name);
+  };
 
   const handleDownloadExcel = async () => {
     if (!selectedReportFund) {
@@ -4206,6 +4219,39 @@ export const AttributionDashboard: React.FC = () => {
                   </div>
                 </div>
               )}
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '6px' }}>PORTFOLIO HOLDINGS (for stock/sector tables)</label>
+                <label
+                  htmlFor="report-holdings-upload"
+                  style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px',
+                    padding: '12px', background: 'rgba(255,255,255,0.03)',
+                    border: `1px dashed ${reportHoldingsName ? 'rgba(139,92,246,0.5)' : 'var(--glass-border)'}`,
+                    borderRadius: '8px', cursor: 'pointer', fontSize: '0.85rem'
+                  }}
+                >
+                  <span style={{ color: reportHoldingsName ? '#a78bfa' : 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {reportHoldingsName ? `📎 ${reportHoldingsName}` : '⬆ Attach holdings .xlsx / .csv (fund + benchmark)'}
+                  </span>
+                  {reportHoldingsName && (
+                    <span
+                      onClick={(e) => { e.preventDefault(); setUploadedFile(null); setReportHoldingsName(''); }}
+                      style={{ color: 'var(--text-muted)', fontWeight: 700, padding: '0 6px' }}
+                    >✕</span>
+                  )}
+                </label>
+                <input
+                  id="report-holdings-upload"
+                  type="file"
+                  accept=".csv, .xlsx, .xls"
+                  onChange={handleReportHoldingsUpload}
+                  style={{ display: 'none' }}
+                />
+                <p style={{ margin: '6px 0 0 0', fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                  Optional. Without it, risk metrics and returns still generate, but the Top-10 stocks, sector calls and entries/exits stay blank.
+                </p>
+              </div>
 
               <div>
                 <div style={{ display: 'flex', gap: '12px' }}>
