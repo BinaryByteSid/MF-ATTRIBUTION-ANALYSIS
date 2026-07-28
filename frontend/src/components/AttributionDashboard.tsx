@@ -253,6 +253,39 @@ const calculateRiskMetrics = (
   };
 };
 
+// Fetch real, NAV-based risk metrics from the backend with retries. Returns the
+// parsed payload ONLY when it carries `risk_obs_days` (the marker that the
+// backend computed from real daily NAV) — otherwise null. This prevents the UI
+// from silently showing the frontend-reconstructed fallback, whose values swing
+// around because they're built from simulated stock returns rather than the
+// fund's actual NAV. Retries absorb Render cold-starts and transient AMFI
+// hiccups that would otherwise drop us onto that fallback.
+async function fetchRealRiskMetrics(
+  url: string,
+  token: string | null,
+  attempts = 3,
+): Promise<any | null> {
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 90000); // allow cold start
+      const resp = await fetch(url, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data && data.risk_obs_days != null) return data; // real NAV-based result
+      }
+    } catch {
+      /* network/abort — fall through to retry */
+    }
+    if (i < attempts - 1) await new Promise((r) => setTimeout(r, 1500 * (i + 1)));
+  }
+  return null;
+}
+
 const parseInlineBold = (text: string) => {
   const parts = text.split(/\*\*([^*]+)\*\*/g);
   return parts.map((part, index) => {
@@ -860,6 +893,9 @@ export const AttributionDashboard: React.FC = () => {
   const [holdings, setHoldings] = useState<Holding[]>([]);
   const [brinson, setBrinson] = useState<BrinsonSegment[]>([]);
   const [risk, setRisk] = useState<RiskMetrics | null>(null);
+  // True when we tried but couldn't get real NAV-based metrics from the backend
+  // (so the UI shows a retry note instead of fabricated fallback numbers).
+  const [riskUnavailable, setRiskUnavailable] = useState<boolean>(false);
   const [apiMonthlyReturns, setApiMonthlyReturns] = useState<{ date: string; fund_return: number; bench_return: number }[]>([]);
   const [activeTab, setActiveTab] = useState<'overview' | 'comparison' | 'brinson' | 'overlap' | 'reports' | 'performance' | 'copilot'>('overview');
 
@@ -1436,7 +1472,7 @@ export const AttributionDashboard: React.FC = () => {
       let summ: PortfolioSummary;
       let holds: Holding[];
       let brin: BrinsonSegment[];
-      let rsk: RiskMetrics;
+      let rsk: RiskMetrics | null = null;
 
       const calcCumulative = (rets: { returnVal: number }[]) => {
         if (rets.length === 0) return 0;
@@ -1538,35 +1574,35 @@ export const AttributionDashboard: React.FC = () => {
             const benchIsinParam = benchNameParam
               ? (customHoldings.find(h => h.scheme_name === benchNameParam)?.isin || '') : '';
             const singleScheme = customHoldings.length === 1 ? customHoldings[0] : null;
-            if (!singleScheme) throw new Error('multi-scheme portfolio: compute locally');
-            const riskUrl = `${apiBaseUrl}/reports/risk-metrics?fund_name=${encodeURIComponent(singleScheme.scheme_name)}&isin=${encodeURIComponent(singleScheme.isin || '')}&from_date=${dashboardFromDate}&to_date=${dashboardToDate}&bench_name=${encodeURIComponent(benchNameParam)}&bench_isin=${encodeURIComponent(benchIsinParam)}`;
-            const token = localStorage.getItem('access_token');
-            const riskResp = await fetch(riskUrl, {
-              headers: token ? { 'Authorization': `Bearer ${token}` } : {},
-            });
-            if (riskResp.ok) {
-              const riskData = await riskResp.json();
-              // risk_obs_days is only present when the backend computed from
-              // real NAV data; without it the response is a synthetic fallback
-              // and the local calculation is more truthful.
-              if (riskData.risk_obs_days == null) throw new Error('backend fallback: compute locally');
-              rsk = {
-                sharpe_ratio: riskData.sharpe_ratio ?? 0,
-                sortino_ratio: riskData.sortino_ratio ?? 0,
-                max_drawdown: riskData.max_drawdown ?? 0,
-                beta: riskData.beta ?? 1,
-                alpha: riskData.alpha ?? 0,
-                information_ratio: riskData.information_ratio ?? 0,
-                var_95: riskData.var_95 ?? 0,
-              };
-              if (Array.isArray(riskData.monthly_returns) && riskData.monthly_returns.length > 0) {
-                setApiMonthlyReturns(riskData.monthly_returns);
-              }
-            } else {
+            if (!singleScheme) {
+              // A genuine multi-scheme portfolio has no single NAV, so the
+              // aggregated local computation is the only option here.
               rsk = calculateRiskMetrics(aligned);
+            } else {
+              const riskUrl = `${apiBaseUrl}/reports/risk-metrics?fund_name=${encodeURIComponent(singleScheme.scheme_name)}&isin=${encodeURIComponent(singleScheme.isin || '')}&from_date=${dashboardFromDate}&to_date=${dashboardToDate}&bench_name=${encodeURIComponent(benchNameParam)}&bench_isin=${encodeURIComponent(benchIsinParam)}`;
+              const token = localStorage.getItem('access_token');
+              const riskData = await fetchRealRiskMetrics(riskUrl, token);
+              if (riskData) {
+                rsk = {
+                  sharpe_ratio: riskData.sharpe_ratio ?? 0,
+                  sortino_ratio: riskData.sortino_ratio ?? 0,
+                  max_drawdown: riskData.max_drawdown ?? 0,
+                  beta: riskData.beta ?? 1,
+                  alpha: riskData.alpha ?? 0,
+                  information_ratio: riskData.information_ratio ?? 0,
+                  var_95: riskData.var_95 ?? 0,
+                };
+                if (Array.isArray(riskData.monthly_returns) && riskData.monthly_returns.length > 0) {
+                  setApiMonthlyReturns(riskData.monthly_returns);
+                }
+              } else {
+                // Couldn't get real NAV-based metrics — show 'unavailable'
+                // rather than fabricated fallback numbers.
+                rsk = null;
+              }
             }
           } catch {
-            rsk = calculateRiskMetrics(aligned);
+            rsk = customHoldings.length === 1 ? null : calculateRiskMetrics(aligned);
           }
         } else {
           const scheme = customHoldings.find(h => h.scheme_name === selectedSchemeName);
@@ -1619,7 +1655,6 @@ export const AttributionDashboard: React.FC = () => {
             cumBenchScheme
           );
 
-          const alignedScheme = alignReturns(retsH, retsBenchScheme);
           // Fetch risk metrics from backend API for consistency with Excel report.
           // Pass the scheme ISIN so the backend resolves the exact scheme
           // instead of guessing from the name (names like "...-Reg(G)" often
@@ -1632,14 +1667,8 @@ export const AttributionDashboard: React.FC = () => {
               ? (customHoldings.find(h => h.scheme_name === benchNameParam)?.isin || '') : '';
             const riskUrl = `${apiBaseUrl}/reports/risk-metrics?fund_name=${encodeURIComponent(scheme.scheme_name)}&isin=${encodeURIComponent(scheme.isin || '')}&from_date=${dashboardFromDate}&to_date=${dashboardToDate}&bench_name=${encodeURIComponent(benchNameParam)}&bench_isin=${encodeURIComponent(benchIsinParam)}`;
             const token = localStorage.getItem('access_token');
-            const riskResp = await fetch(riskUrl, {
-              headers: token ? { 'Authorization': `Bearer ${token}` } : {},
-            });
-            if (riskResp.ok) {
-              const riskData = await riskResp.json();
-              // Missing risk_obs_days means the backend used its synthetic
-              // fallback — prefer the local calculation over junk values.
-              if (riskData.risk_obs_days == null) throw new Error('backend fallback: compute locally');
+            const riskData = await fetchRealRiskMetrics(riskUrl, token);
+            if (riskData) {
               rsk = {
                 sharpe_ratio: riskData.sharpe_ratio ?? 0,
                 sortino_ratio: riskData.sortino_ratio ?? 0,
@@ -1653,24 +1682,19 @@ export const AttributionDashboard: React.FC = () => {
                 setApiMonthlyReturns(riskData.monthly_returns);
               }
             } else {
-              rsk = calculateRiskMetrics(alignedScheme);
+              rsk = null; // show 'unavailable', never fabricated fallback numbers
             }
           } catch {
-            rsk = calculateRiskMetrics(alignedScheme);
+            rsk = null;
           }
         }
       } else {
         const dbSummary = await getPortfolioSummary(selectedPortfolioId);
         holds = await getPortfolioHoldings(selectedPortfolioId);
         
-        const benchmarkFundName = entityB || 'NIFTY 50 TRI';
         const retsPortRaw = getPortfolioReturnsFromHoldings(holds);
-        const retsBenchRaw = getEntityMonthlyReturnsList(benchmarkFundName);
 
         const retsPort = retsPortRaw.filter(filterFn);
-        const retsBench = retsBenchRaw.filter(filterFn);
-
-        const aligned = alignReturns(retsPort, retsBench);
         const cumPort = calcCumulative(retsPort);
         
         const absReturn = retsPort.length > 0 ? cumPort * 100 : dbSummary.absolute_return;
@@ -1705,14 +1729,8 @@ export const AttributionDashboard: React.FC = () => {
           const benchNameParam = entityB || '';
           const riskUrl = `${apiBaseUrl}/reports/risk-metrics?fund_name=${encodeURIComponent(fundName)}&isin=${encodeURIComponent(fundIsin)}&from_date=${dashboardFromDate}&to_date=${dashboardToDate}&bench_name=${encodeURIComponent(benchNameParam)}`;
           const token = localStorage.getItem('access_token');
-          const riskResp = await fetch(riskUrl, {
-            headers: token ? { 'Authorization': `Bearer ${token}` } : {},
-          });
-          if (riskResp.ok) {
-            const riskData = await riskResp.json();
-            // Missing risk_obs_days means the backend used its synthetic
-            // fallback — prefer the local calculation over junk values.
-            if (riskData.risk_obs_days == null) throw new Error('backend fallback: compute locally');
+          const riskData = await fetchRealRiskMetrics(riskUrl, token);
+          if (riskData) {
             rsk = {
               sharpe_ratio: riskData.sharpe_ratio ?? 0,
               sortino_ratio: riskData.sortino_ratio ?? 0,
@@ -1726,10 +1744,10 @@ export const AttributionDashboard: React.FC = () => {
               setApiMonthlyReturns(riskData.monthly_returns);
             }
           } else {
-            rsk = calculateRiskMetrics(aligned);
+            rsk = null; // show 'unavailable', never fabricated fallback numbers
           }
         } catch {
-          rsk = calculateRiskMetrics(aligned);
+          rsk = null;
         }
       }
 
@@ -1737,6 +1755,7 @@ export const AttributionDashboard: React.FC = () => {
       setHoldings(holds.sort((a, b) => b.weight - a.weight));
       setBrinson(brin);
       setRisk(rsk);
+      setRiskUnavailable(rsk === null);
     };
 
     loadPortfolioData();
@@ -2819,6 +2838,17 @@ export const AttributionDashboard: React.FC = () => {
             </div>
           )}
  
+          {/* Risk metrics couldn't be computed from real NAV — show a note
+              instead of the old fabricated fallback numbers. */}
+          {riskUnavailable && (
+            <div className="glass-card" style={{ margin: '0 0 8px 0', padding: '18px 24px', border: '1px solid rgba(251, 191, 36, 0.35)' }}>
+              <div style={{ fontWeight: 700, color: '#fbbf24', marginBottom: '4px' }}>⚠ Risk metrics unavailable</div>
+              <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                Couldn't reach the NAV service to compute Sharpe / Beta / Alpha for this selection. This is usually a cold-start on the free server — wait a few seconds and change the date or reselect the fund to retry. (Values are never estimated locally, so nothing incorrect is shown.)
+              </div>
+            </div>
+          )}
+
           {/* Summary Sheet of Excel Report style block */}
           {summary && risk && (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(450px, 1fr))', gap: '24px', marginBottom: '8px' }}>
